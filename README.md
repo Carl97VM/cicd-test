@@ -116,6 +116,7 @@ El sistema estará disponible en `http://localhost:8000`.
 docker exec -it laravel_app php artisan key:generate
 docker exec -it laravel_app php artisan migrate:fresh --seed
 docker exec -it laravel_app php artisan route:clear
+docker exec -it laravel_app ./vendor/bin/pint
 docker exec -it laravel_app php artisan test
 docker exec -it laravel_app php artisan storage:link
 docker exec -it laravel_app php artisan tinker

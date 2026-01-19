@@ -12,7 +12,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4" # Coincide con tu Dockerfile
+          php-version: "8.2" # Coincide con tu Dockerfile
       - run: composer install --no-interaction --prefer-dist
       - run: composer lint   # El script que añadimos al composer.json
       - run: composer static # El script de PHPStan
@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4"
+          php-version: "8.2"
       - run: |
           composer install
           cp .env.example .env
