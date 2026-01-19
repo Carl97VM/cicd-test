@@ -116,19 +116,21 @@ El sistema estará disponible en `http://localhost:8000`.
 docker exec -it laravel_app php artisan key:generate
 docker exec -it laravel_app php artisan migrate:fresh --seed
 docker exec -it laravel_app php artisan route:clear
-docker exec -it laravel_app ./vendor/bin/pint
-docker exec -it laravel_app php artisan test
 docker exec -it laravel_app php artisan storage:link
 docker exec -it laravel_app php artisan tinker
 docker exec -it laravel_app php artisan test --filter=HealthTest
+docker exec -it laravel_app ./vendor/bin/pint
+docker exec -it laravel_app php artisan test
+docker exec -it laravel_app composer static
 
 docker exec -it laravel_app ./vendor/bin/pint --test
 docker exec -it laravel_app ./vendor/bin/pint
 
 
 docker exec -it laravel_vite npm install
-docker exec -it laravel_vite npm run build
 docker exec -it laravel_vite npm run test
+docker exec -it laravel_vite npm run lint
+docker exec -it laravel_vite npm run build
 ```
 
 ## 📄 Licencia
