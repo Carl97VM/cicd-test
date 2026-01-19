@@ -2,6 +2,14 @@
 
 <!-- ¿Qué hace este PR? ¿Qué problema resuelve? -->
 
+## ✅ Checklist de Calidad (Local)
+- [ ] `composer lint` (Pint) aprobado.
+- [ ] `composer static` (PHPStan) sin errores.
+- [ ] `php artisan test` (Backend) 16 tests pasados.
+- [ ] `npm run lint` (ESLint) aprobado.
+- [ ] `npm run test` (Vitest) 10 tests pasados.
+- [ ] `npm run build` exitoso.
+
 # Tipo de Cambio
 
 -   [ ] 🐛 Bug fix (corrección de error no disruptiva)
