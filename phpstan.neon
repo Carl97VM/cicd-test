@@ -1,0 +1,31 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    paths:
+        - app/
+    level: 5
+
+    # Soluciona problemas de lógica booleana en reportes
+    treatPhpDocTypesAsCertain: false
+
+    # Evita que falle si una regla de ignorar no se encuentra en una ejecución específica
+    reportUnmatchedIgnoredErrors: false
+
+    ignoreErrors:
+        # Error de covarianza en Modelos (Persona, DetalleCompra, etc.) - Laravel 12
+        - '#is not covariant with PHPDoc type list<string>#'
+
+        # Error de colecciones irresolubles en map() de controladores
+        - '#Parameter \#1 \$callback of method Illuminate\\Database\\Eloquent\\Collection.*map\(\) contains unresolvable type#'
+        - '#Parameter \#1 \$callback of method .* map\(\) contains unresolvable type#'
+
+        # Errores de acceso a propiedades en Resources y Modelos dinámicos
+        - '#Access to an undefined property App\\Http\\Resources\\.*#'
+        - '#Access to an undefined property Illuminate\\Database\\Eloquent\\Model::.*#'
+
+        # Lógica redundante en Services
+        - '#Right side of && is always true#'
+
+    excludePaths:
+        - tests/*

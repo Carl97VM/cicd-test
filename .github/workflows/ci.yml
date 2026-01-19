@@ -1,0 +1,47 @@
+name: CI Robust Pipeline
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  backend_quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4" # Coincide con tu Dockerfile
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer lint   # El script que añadimos al composer.json
+      - run: composer static # El script de PHPStan
+
+  backend_tests:
+    runs-on: ubuntu-latest
+    needs: backend_quality
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+      - run: |
+          composer install
+          cp .env.example .env
+          mkdir -p database
+          touch database/database.sqlite
+          php artisan key:generate
+          php artisan migrate --force
+          php artisan test
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run test
+      - run: npm run build
