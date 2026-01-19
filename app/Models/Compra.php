@@ -28,7 +28,7 @@ use Illuminate\Support\Facades\DB;
  * @property string|null $observaciones
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
- * * -- Accessors --
+ *                                                       * -- Accessors --
  * @property-read float $subtotal_calculado
  * @property-read int $cantidad_items
  * @property-read bool $es_credito
@@ -83,11 +83,17 @@ class Compra extends Model
     protected $appends = ['cantidad_items', 'es_credito', 'puede_editarse'];
 
     public const TIPO_CONTADO = 'Contado';
+
     public const TIPO_CREDITO = 'Credito';
+
     public const COMPROBANTE_FACTURA = 'Factura';
+
     public const ESTADO_PENDIENTE = 'Pendiente';
+
     public const ESTADO_COMPLETADA = 'Completada';
+
     public const ESTADO_ANULADA = 'Anulada';
+
     public const CODIGO_PREFIJO = 'COMP';
 
     /* --- RELACIONES --- */
@@ -159,7 +165,8 @@ class Compra extends Model
             /** @var Compra|null $ultimo */
             $ultimo = self::lockForUpdate()->orderBy('id', 'desc')->first();
             $numero = $ultimo ? (int) substr($ultimo->codigo, strlen(self::CODIGO_PREFIJO)) + 1 : 1;
-            return self::CODIGO_PREFIJO . str_pad((string)$numero, 6, '0', STR_PAD_LEFT);
+
+            return self::CODIGO_PREFIJO.str_pad((string) $numero, 6, '0', STR_PAD_LEFT);
         });
     }
 
@@ -229,23 +236,26 @@ class Compra extends Model
             }
 
             $this->estado = self::ESTADO_ANULADA;
+
             return $this->save();
         });
     }
 
     public function estaVencida(): bool
     {
-        if (!$this->es_credito || !$this->fecha_vencimiento) {
+        if (! $this->es_credito || ! $this->fecha_vencimiento) {
             return false;
         }
+
         return $this->fecha_vencimiento->isPast();
     }
 
     public function diasParaVencimiento(): ?int
     {
-        if (!$this->es_credito || !$this->fecha_vencimiento) {
+        if (! $this->es_credito || ! $this->fecha_vencimiento) {
             return null;
         }
+
         // CORRECCIÓN: Forzamos el cast a int para cumplir con la firma del método
         return (int) now()->diffInDays($this->fecha_vencimiento, false);
     }

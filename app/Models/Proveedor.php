@@ -34,7 +34,7 @@ use Illuminate\Support\Facades\DB;
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
  * @property \Illuminate\Support\Carbon|null $deleted_at
- * * -- Accessors --
+ *                                                       * -- Accessors --
  * @property-read float $credito_disponible
  * @property-read bool $tiene_credito_disponible
  * @property-read float $porcentaje_credito_usado
@@ -95,14 +95,21 @@ class Proveedor extends Model
     ];
 
     public const TIPO_PRODUCTO = 'Producto';
+
     public const TIPO_SERVICIO = 'Servicio';
+
     public const TIPO_AMBOS = 'Ambos';
+
     public const CODIGO_PREFIJO = 'PROV';
 
     public const CALIFICACION_MALO = 1;
+
     public const CALIFICACION_REGULAR = 2;
+
     public const CALIFICACION_BUENO = 3;
+
     public const CALIFICACION_EXCELENTE = 4;
+
     public const CALIFICACION_SOBRESALIENTE = 5;
 
     public const CALIFICACIONES = [
@@ -146,7 +153,10 @@ class Proveedor extends Model
 
     public function getPorcentajeCreditoUsadoAttribute(): float
     {
-        if ($this->limite_credito <= 0) return 0.0;
+        if ($this->limite_credito <= 0) {
+            return 0.0;
+        }
+
         return (float) round(($this->credito_usado / $this->limite_credito) * 100, 2);
     }
 
@@ -163,7 +173,8 @@ class Proveedor extends Model
             /** @var Proveedor|null $ultimo */
             $ultimo = self::lockForUpdate()->orderBy('id', 'desc')->first();
             $numero = $ultimo ? (int) substr($ultimo->codigo, strlen(self::CODIGO_PREFIJO)) + 1 : 1;
-            return self::CODIGO_PREFIJO . str_pad((string)$numero, 6, '0', STR_PAD_LEFT);
+
+            return self::CODIGO_PREFIJO.str_pad((string) $numero, 6, '0', STR_PAD_LEFT);
         });
     }
 
@@ -177,27 +188,31 @@ class Proveedor extends Model
     public function usarCredito(float $monto): bool
     {
         if ($this->credito_usado + $monto > $this->limite_credito) {
-            throw new \Exception("Monto excede el crédito disponible");
+            throw new \Exception('Monto excede el crédito disponible');
         }
         $this->credito_usado += $monto;
+
         return $this->save();
     }
 
     public function liberarCredito(float $monto): bool
     {
         $this->credito_usado = (float) max(0, $this->credito_usado - $monto);
+
         return $this->save();
     }
 
     public function actualizarUltimaCompra($fecha = null): bool
     {
         $this->ultima_compra = $fecha ?? now();
+
         return $this->save();
     }
 
     public function incrementarTotalCompras(float $monto): bool
     {
         $this->total_compras += $monto;
+
         return $this->save();
     }
 

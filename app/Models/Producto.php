@@ -84,6 +84,6 @@ class Producto extends Model
         $ultimo = self::orderBy('id', 'desc')->first();
         $numero = $ultimo ? (int) substr($ultimo->codigo, 4) + 1 : 1;
 
-        return 'PROD' . str_pad((string)$numero, 6, '0', STR_PAD_LEFT);
+        return 'PROD'.str_pad((string) $numero, 6, '0', STR_PAD_LEFT);
     }
 }

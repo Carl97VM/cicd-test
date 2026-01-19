@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 
 /**
  * Modelo Cliente
+ *
  * * @property int $id
  * @property int $persona_id
  * @property string $codigo
@@ -26,7 +27,7 @@ use Illuminate\Support\Facades\DB;
  * @property bool $estado
  * @property \Illuminate\Support\Carbon|null $created_at
  * @property \Illuminate\Support\Carbon|null $updated_at
- * * -- Accessors --
+ *                                                       * -- Accessors --
  * @property-read float $credito_disponible
  * @property-read bool $tiene_credito_disponible
  * @property-read float $porcentaje_credito_usado
@@ -77,9 +78,13 @@ class Cliente extends Model
     ];
 
     public const TIPO_REGULAR = 'Regular';
+
     public const TIPO_VIP = 'VIP';
+
     public const TIPO_CORPORATIVO = 'Corporativo';
+
     public const TIPO_MAYORISTA = 'Mayorista';
+
     public const CODIGO_PREFIJO = 'CLI';
 
     /* --- RELACIONES --- */
@@ -136,7 +141,10 @@ class Cliente extends Model
 
     public function getPorcentajeCreditoUsadoAttribute(): float
     {
-        if ($this->limite_credito == 0) return 0.0;
+        if ($this->limite_credito == 0) {
+            return 0.0;
+        }
+
         return (float) round(($this->credito_usado / $this->limite_credito) * 100, 2);
     }
 
@@ -148,7 +156,8 @@ class Cliente extends Model
             /** @var Cliente|null $ultimo */
             $ultimo = self::lockForUpdate()->orderBy('id', 'desc')->first();
             $numero = $ultimo ? (int) substr($ultimo->codigo, strlen(self::CODIGO_PREFIJO)) + 1 : 1;
-            return self::CODIGO_PREFIJO . str_pad((string)$numero, 6, '0', STR_PAD_LEFT);
+
+            return self::CODIGO_PREFIJO.str_pad((string) $numero, 6, '0', STR_PAD_LEFT);
         });
     }
 
@@ -167,24 +176,28 @@ class Cliente extends Model
             throw new \Exception("El monto ({$monto}) excede el crédito disponible");
         }
         $this->credito_usado += $monto;
+
         return $this->save();
     }
 
     public function liberarCredito(float $monto): bool
     {
         $this->credito_usado = (float) max(0, $this->credito_usado - $monto);
+
         return $this->save();
     }
 
     public function actualizarUltimaCompra($fecha = null): bool
     {
         $this->ultima_compra = $fecha ?? now();
+
         return $this->save();
     }
 
     public function incrementarTotalCompras(float $monto): bool
     {
         $this->total_compras += $monto;
+
         return $this->save();
     }
 
@@ -194,10 +207,12 @@ class Cliente extends Model
     {
         return $this->tipo_cliente === self::TIPO_VIP;
     }
+
     public function esMayorista(): bool
     {
         return $this->tipo_cliente === self::TIPO_MAYORISTA;
     }
+
     public function esCorporativo(): bool
     {
         return $this->tipo_cliente === self::TIPO_CORPORATIVO;

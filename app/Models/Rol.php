@@ -103,7 +103,7 @@ class Rol extends Model
         // CORRECCIÓN DE TIPADO: Cast a string para str_pad
         $numero = $ultimo ? (int) substr($ultimo->codigo, strlen(self::CODIGO_PREFIJO)) + 1 : 1;
 
-        return self::CODIGO_PREFIJO . str_pad((string)$numero, 4, '0', STR_PAD_LEFT);
+        return self::CODIGO_PREFIJO.str_pad((string) $numero, 4, '0', STR_PAD_LEFT);
     }
 
     /*

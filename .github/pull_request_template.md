@@ -1,12 +1,17 @@
-## 🚀 Qué cambia
-- **Tipo:** feat | fix | refactor | ci | docs
-- **Descripción:** (Breve resumen de los cambios realizados)
+## 🎯 Tipo de Cambio
+- [ ] feat | fix | refactor | ci | docs 
 
-## ✅ Evidencia
-- [ ] **CI en verde:** Captura de pantalla o link al pipeline exitoso.
-- [ ] **Tests locales:** Resultados de `composer test` y `npm run test` ejecutados en Docker.
-- [ ] **Análisis Estático:** `composer static` y `npm run lint` sin errores.
+## ✅ Checklist de Calidad (Local)
+- [ ] `composer lint` (Pint) aprobado.
+- [ ] `composer static` (PHPStan) sin errores.
+- [ ] `php artisan test` (Backend) 16 tests pasados.
+- [ ] `npm run lint` (ESLint) aprobado.
+- [ ] `npm run test` (Vitest) 10 tests pasados.
+- [ ] `npm run build` exitoso.
+
+## 📸 Evidencia
+- Adjuntar capturas de los comandos verdes.
 
 ## ⚠️ Riesgo / Rollback
-- **Riesgo:** (Ej. Alteración de la tabla 'ventas' o 'productos')
-- **Rollback:** (Ej. Revertir commit y restaurar backup de database.sqlite si aplica)
+- Riesgo: 
+- Rollback:

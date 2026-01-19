@@ -27,11 +27,11 @@ class VentaController extends Controller
     {
         try {
             $query = Venta::with(['cliente.persona', 'detalles.producto'])
-                ->when($request->filled('estado'), fn($q) => $q->where('estado', $request->estado))
-                ->when($request->filled('cliente_id'), fn($q) => $q->where('cliente_id', $request->cliente_id))
-                ->when($request->filled('tipo_venta'), fn($q) => $q->where('tipo_venta', $request->tipo_venta))
-                ->when($request->filled('fecha_desde'), fn($q) => $q->whereDate('fecha_venta', '>=', $request->fecha_desde))
-                ->when($request->filled('fecha_hasta'), fn($q) => $q->whereDate('fecha_venta', '<=', $request->fecha_hasta))
+                ->when($request->filled('estado'), fn ($q) => $q->where('estado', $request->estado))
+                ->when($request->filled('cliente_id'), fn ($q) => $q->where('cliente_id', $request->cliente_id))
+                ->when($request->filled('tipo_venta'), fn ($q) => $q->where('tipo_venta', $request->tipo_venta))
+                ->when($request->filled('fecha_desde'), fn ($q) => $q->whereDate('fecha_venta', '>=', $request->fecha_desde))
+                ->when($request->filled('fecha_hasta'), fn ($q) => $q->whereDate('fecha_venta', '<=', $request->fecha_hasta))
                 ->when($request->filled('search'), function ($q) use ($request) {
                     $search = $request->search;
                     $q->where(function ($subQ) use ($search) {
@@ -308,7 +308,7 @@ class VentaController extends Controller
             ->activos()
             ->orderBy('codigo')
             ->get()
-            ->map(fn($c) => [
+            ->map(fn ($c) => [
                 'id' => $c->id,
                 'codigo' => $c->codigo,
                 'nombre' => $c->persona->nombre_completo ?? 'Sin nombre',

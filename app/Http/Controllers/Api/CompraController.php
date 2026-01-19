@@ -14,7 +14,6 @@ use Exception;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Controlador API para gestión de Compras
@@ -28,11 +27,11 @@ class CompraController extends Controller
     {
         try {
             $query = Compra::with(['proveedor.persona', 'detalles.producto'])
-                ->when($request->filled('estado'), fn($q) => $q->where('estado', $request->estado))
-                ->when($request->filled('proveedor_id'), fn($q) => $q->where('proveedor_id', $request->proveedor_id))
-                ->when($request->filled('tipo_compra'), fn($q) => $q->where('tipo_compra', $request->tipo_compra))
-                ->when($request->filled('fecha_desde'), fn($q) => $q->whereDate('fecha_compra', '>=', $request->fecha_desde))
-                ->when($request->filled('fecha_hasta'), fn($q) => $q->whereDate('fecha_compra', '<=', $request->fecha_hasta))
+                ->when($request->filled('estado'), fn ($q) => $q->where('estado', $request->estado))
+                ->when($request->filled('proveedor_id'), fn ($q) => $q->where('proveedor_id', $request->proveedor_id))
+                ->when($request->filled('tipo_compra'), fn ($q) => $q->where('tipo_compra', $request->tipo_compra))
+                ->when($request->filled('fecha_desde'), fn ($q) => $q->whereDate('fecha_compra', '>=', $request->fecha_desde))
+                ->when($request->filled('fecha_hasta'), fn ($q) => $q->whereDate('fecha_compra', '<=', $request->fecha_hasta))
                 ->when($request->filled('search'), function ($q) use ($request) {
                     $search = $request->search;
                     $q->where(function ($subQ) use ($search) {
