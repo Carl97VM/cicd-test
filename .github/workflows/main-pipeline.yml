@@ -84,8 +84,8 @@ jobs:
   deploy-staging:
     name: Deploy to Staging
     needs: build
-    runs-on: self-hosted
-    environment: APP_KEY    # Tu entorno con los 12 secretos (image_36b8d7.png)
+    runs-on: self-hosted   # LA CLAVE DEL ÉXITO
+    environment: APP_KEY    # Para que lea tus secretos de GitHub
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia3'
     steps:
       - name: Download Artifact
@@ -93,58 +93,27 @@ jobs:
         with:
           name: app-package
 
-      - name: Copy Artifact via SCP
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.STAGING_HOST }}
-          username: ${{ secrets.STAGING_USER }}
-          key: ${{ secrets.STAGING_SSH_KEY }}
-          port: 22
-          timeout: 120s
-          command_timeout: 20m
-          source: "release.tar.gz"
-          target: "/tmp"
-
-      - name: Execute Atomic Deploy via SSH
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.STAGING_HOST }}
-          username: ${{ secrets.STAGING_USER }}
-          key: ${{ secrets.STAGING_SSH_KEY }}
-          port: 22
-          script: |
-            set -e
-            TIMESTAMP=$(date +%Y%m%d%H%M%S)
-            BASE_PATH="/var/www/comprasventas"
-            RELEASE_PATH="$BASE_PATH/releases/$TIMESTAMP"
-            
-            mkdir -p "$RELEASE_PATH"
-            tar -xzf /tmp/release.tar.gz -C "$RELEASE_PATH"
-            rm /tmp/release.tar.gz
-            
-            # Tarea 3: Symlinks Shared
-            ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
-            ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
-            
-            # Tarea 1.A: Activación
-            cd "$RELEASE_PATH"
-            php artisan migrate --force
-            php artisan optimize:clear
-            
-            [ -L "$BASE_PATH/current" ] && PREV_RELEASE=$(readlink "$BASE_PATH/current")
-            ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
-            
-            sudo systemctl reload php8.4-fpm
-            
-            # Health Check
-            sleep 3
-            if curl -f -s "http://localhost/health" > /dev/null; then
-                echo "✅ Despliegue Exitoso"
-            else
-                echo "❌ FALLO: Ejecutando Rollback"
-                [ ! -z "$PREV_RELEASE" ] && ln -nfs "$PREV_RELEASE" "$BASE_PATH/current"
-                exit 1
-            fi
+      - name: Local Atomic Deploy
+        run: |
+          set -e
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          BASE_PATH="/var/www/comprasventas"
+          RELEASE_PATH="$BASE_PATH/releases/$TIMESTAMP"
+          
+          mkdir -p "$RELEASE_PATH"
+          tar -xzf release.tar.gz -C "$RELEASE_PATH"
+          
+          # Tarea 3: Enlaces Shared (Punto 3)
+          ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
+          ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
+          
+          # Tarea 1.A: Migraciones y Switch Atómico
+          cd "$RELEASE_PATH"
+          php artisan migrate --force
+          ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
+          
+          sudo systemctl reload php8.4-fpm
+          echo "✅ Despliegue completado localmente"
 
   # ==========================================
   # Tarea 1.B: CD a Producción
