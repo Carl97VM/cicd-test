@@ -10,43 +10,30 @@ class HealthController extends Controller
 {
     public function __invoke(): JsonResponse
     {
-        $start = microtime(true);
-        $results = [];
+        $dbOk = false;
+        $latencyMs = 0;
+        $storageOk = false;
+        $cacheOk = false;
 
-        // 1. Verificación de Base de Datos (PostgreSQL)
         try {
-            $dbStart = microtime(true);
+            $t0 = microtime(true);
             DB::connection()->getPdo();
-            $results['db'] = [
-                'status' => 'ok',
-                'latency_ms' => round((microtime(true) - $dbStart) * 1000, 2),
-                'connection' => config('database.default'),
-            ];
-        } catch (\Exception $e) {
-            $results['db'] = ['status' => 'fail', 'error' => 'Database connection refused'];
+            $latencyMs = (int) ((microtime(true) - $t0) * 1000);
+            $dbOk = true;
+
+            $storageOk = is_writable(storage_path('framework/views'));
+
+            Cache::put('health_check', true, 5);
+            $cacheOk = Cache::has('health_check');
+        } catch (\Throwable $e) {
+            // Mantener estados en false si hay fallo de infraestructura
         }
 
-        // 2. Verificación de Almacenamiento (Permisos de Escritura)
-        try {
-            $storagePath = storage_path('app/health_check.txt');
-            file_put_contents($storagePath, 'check');
-            unlink($storagePath);
-            $results['storage'] = ['status' => 'ok', 'writable' => true];
-        } catch (\Exception $e) {
-            $results['storage'] = ['status' => 'fail', 'writable' => false];
-        }
+        $isHealthy = $dbOk && $storageOk && $cacheOk;
 
-        // 3. Verificación de Cache (Redis/Database)
-        try {
-            Cache::put('health_check', true, 10);
-            $results['cache'] = ['status' => Cache::get('health_check') ? 'ok' : 'fail'];
-        } catch (\Exception $e) {
-            $results['cache'] = ['status' => 'fail'];
-        }
-
-        // 4. Metadatos de Release (Trazabilidad Punto 1.D)
-        $totalLatency = round((microtime(true) - $start) * 1000, 2);
-        $isHealthy = collect($results)->every(fn ($item) => $item['status'] === 'ok');
+        $versionFile = base_path('RELEASE_ID');
+        $versionContent = @file_get_contents($versionFile);
+        $version = ($versionContent !== false) ? trim($versionContent) : '1.0.0-dev';
 
         return response()->json([
             'status' => $isHealthy ? 'ok' : 'degraded',
@@ -54,13 +41,16 @@ class HealthController extends Controller
             'app' => [
                 'name' => config('app.name'),
                 'env' => config('app.env'),
-                'version' => trim(@file_get_contents(base_path('RELEASE_ID')) ?? 'v3.0.0'),
-                'php_version' => PHP_VERSION,
+                'debug' => (bool) config('app.debug'),
+                'version' => $version,
             ],
-            'infrastructure' => $results,
-            'performance' => [
-                'total_latency_ms' => $totalLatency,
+            'db' => [
+                'ok' => $dbOk,
+                'latency_ms' => $latencyMs,
+                'driver' => config('database.default'),
             ],
+            'cache' => ['ok' => $cacheOk],
+            'storage' => ['ok' => $storageOk],
         ], $isHealthy ? 200 : 503);
     }
 }
