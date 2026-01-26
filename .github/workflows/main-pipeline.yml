@@ -3,9 +3,10 @@ name: CI/CD - Sistema de Ventas (Laravel 12)
 on:
   push:
     branches: ["main"]
+    tags: ["v*"] # Sintaxis corregida: ahora está dentro de push
   pull_request:
     branches: ["main"]
-  tags: ["v*"] # Despliegue a producción con tags semánticos
+  workflow_dispatch: # Permite ejecución manual
 
 jobs:
   # ==========================================
@@ -20,7 +21,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: "8.4" # Sincronizado con tu servidor Debian
           extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite, bcmath, intl, gd
       
       - name: Setup Node
@@ -61,10 +62,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup PHP & Node
+      - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: "8.4"
       
       - name: Production Build
         run: |
@@ -112,7 +113,7 @@ jobs:
             echo "🚀 Iniciando despliegue en $RELEASE_PATH"
             mkdir -p $RELEASE_PATH
             
-            # Transferencia indirecta via SSH temporal
+            # Transferencia indirecta via cat (Appleboy SSH SOP)
             cat > /tmp/release.tar.gz
             tar -xzf /tmp/release.tar.gz -C $RELEASE_PATH
             
@@ -131,8 +132,8 @@ jobs:
             fi
             ln -nfs $RELEASE_PATH $BASE_PATH/current
             
-            # Recarga PHP-FPM
-            sudo systemctl reload php8.3-fpm
+            # Recarga PHP-FPM (Corregido a 8.4)
+            sudo systemctl reload php8.4-fpm
             
             # Tarea 1.A: Health Check Gate
             echo "🏥 Verificando salud..."
@@ -153,7 +154,7 @@ jobs:
     needs: deploy-staging
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    environment: production # ⚠️ AQUÍ SE ACTIVA LA PAUSA DE APROBACIÓN
+    environment: production
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4
@@ -179,5 +180,5 @@ jobs:
             cd $RELEASE_PATH
             php artisan migrate --force
             ln -nfs $RELEASE_PATH $BASE_PATH/current
-            sudo systemctl reload php8.3-fpm
+            sudo systemctl reload php8.4-fpm
             curl -f -s "http://localhost/health"
