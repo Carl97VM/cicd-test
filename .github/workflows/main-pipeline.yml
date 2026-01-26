@@ -84,7 +84,7 @@ jobs:
   deploy-staging:
     name: Deploy to Staging
     needs: build
-    runs-on: ubuntu-latest  # CORREGIDO: Ya no está comentado
+    runs-on: self-hosted
     environment: APP_KEY    # Tu entorno con los 12 secretos (image_36b8d7.png)
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia3'
     steps:
