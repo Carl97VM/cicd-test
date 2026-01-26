@@ -86,65 +86,51 @@ jobs:
   # Tarea 1.A: CD a Staging (Atómico)
   # ==========================================
   deploy-staging:
-    name: Deploy to Staging
     needs: build
-    # Cambia esto en el job deploy-staging:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia3'
+    # Asegúrate de que este nombre coincida con donde guardaste los secretos
+    environment: staging 
     runs-on: ubuntu-latest
-    environment: staging
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
           name: app-package
 
-      - name: Transfer & Atomic Deploy
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.STAGING_HOST }}
           username: ${{ secrets.STAGING_USER }}
           key: ${{ secrets.STAGING_SSH_KEY }}
+          # Enviamos el archivo tar.gz a través de la conexión
+          stdin: ${{ github.workspace }}/release.tar.gz
           script: |
             set -e
             TIMESTAMP=$(date +%Y%m%d%H%M%S)
             BASE_PATH="/var/www/comprasventas"
             RELEASE_PATH="$BASE_PATH/releases/$TIMESTAMP"
             
-            echo "🚀 Iniciando despliegue en $RELEASE_PATH"
-            mkdir -p $RELEASE_PATH
-            
-            # Transferencia indirecta via cat (Appleboy SSH SOP)
+            mkdir -p "$RELEASE_PATH"
+            # Recibimos el archivo y lo extraemos
             cat > /tmp/release.tar.gz
-            tar -xzf /tmp/release.tar.gz -C $RELEASE_PATH
+            tar -xzf /tmp/release.tar.gz -C "$RELEASE_PATH"
             
-            # Tarea 3: Enlaces Symlink compartidos
-            ln -nfs $BASE_PATH/shared/.env $RELEASE_PATH/.env
-            ln -nfs $BASE_PATH/shared/storage $RELEASE_PATH/storage
+            # Tarea 3: Enlaces Simbólicos Atómicos
+            ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
+            ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
             
-            # Tarea 1.A: Comandos Laravel
-            cd $RELEASE_PATH
+            # Tarea 1.A: Migraciones PostgreSQL
+            cd "$RELEASE_PATH"
             php artisan migrate --force
-            php artisan optimize:clear
             
-            # Switch Atómico (Punto 2)
-            if [ -L "$BASE_PATH/current" ]; then
-                PREV_RELEASE=$(readlink "$BASE_PATH/current")
-            fi
-            ln -nfs $RELEASE_PATH $BASE_PATH/current
+            # Cambio Atómico de Versión (Punto 2)
+            ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
             
-            # Recarga PHP-FPM (Corregido a 8.4)
+            # Recarga de PHP 8.4
             sudo systemctl reload php8.4-fpm
             
-            # Tarea 1.A: Health Check Gate
-            echo "🏥 Verificando salud..."
-            sleep 3
-            if curl -f -s "http://localhost/health" > /dev/null; then
-                echo "✅ Staging OK"
-            else
-                echo "❌ FALLO: Revertiendo a $PREV_RELEASE"
-                ln -nfs $PREV_RELEASE $BASE_PATH/current
-                exit 1
-            fi
+            # Health Check (Tarea 1.A)
+            curl -f -s "http://localhost/health"
 
   # ==========================================
   # Tarea 1.B: CD a Producción (Con Approval)
