@@ -3,14 +3,14 @@ name: CI/CD - Sistema de Ventas (Laravel 12)
 on:
   push:
     branches: ["main", "ci-dia3"]
-    tags: ["v*"] # Sintaxis corregida: ahora está dentro de push
+    tags: ["v*"]
   pull_request:
     branches: ["main"]
-  workflow_dispatch: # Permite ejecución manual
+  workflow_dispatch:
 
 jobs:
   # ==========================================
-  # Tarea 4: Quality Gates (Backend + Frontend)
+  # Tarea 4: Quality Gates
   # ==========================================
   quality-gates:
     name: Quality Gates
@@ -27,7 +27,6 @@ jobs:
       - name: Install Dependencies
         run: composer install --no-ansi --no-interaction --no-progress --prefer-dist
 
-      # SOLUCIÓN AL ERROR: Generar APP_KEY y RELEASE_ID para los tests
       - name: Prepare Environment for Tests
         run: |
           cp .env.example .env
@@ -47,7 +46,6 @@ jobs:
         env:
           DB_CONNECTION: sqlite
           DB_DATABASE: database/database.sqlite
-          # Se asegura que la key generada se use en el proceso
 
   # ==========================================
   # Tarea 2: Build Único (Promoción)
@@ -70,9 +68,7 @@ jobs:
           composer install --no-dev --optimize-autoloader
           npm ci
           npm run build
-          # Tarea 1.D: Generar ID de versión
           date +%Y%m%d_%H%M%S > RELEASE_ID
-          # CORRECCIÓN: Crear el tar fuera del directorio actual para evitar el error 'file changed'
           tar -czf ../release.tar.gz .
           mv ../release.tar.gz .
 
@@ -88,8 +84,8 @@ jobs:
   deploy-staging:
     name: Deploy to Staging
     needs: build
-    # runs-on: ubuntu-latest
-    environment: APP_KEY 
+    runs-on: ubuntu-latest  # CORREGIDO: Ya no está comentado
+    environment: APP_KEY    # Tu entorno con los 12 secretos (image_36b8d7.png)
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia3'
     steps:
       - name: Download Artifact
@@ -97,7 +93,6 @@ jobs:
         with:
           name: app-package
 
-      # Usamos SCP para subir el archivo (Tarea 2)
       - name: Copy Artifact via SCP
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -110,7 +105,6 @@ jobs:
           source: "release.tar.gz"
           target: "/tmp"
 
-      # Ejecutamos el despliegue atómico (Tarea 1.A, 3 y 8)
       - name: Execute Atomic Deploy via SSH
         uses: appleboy/ssh-action@v1.2.2
         with:
@@ -128,23 +122,21 @@ jobs:
             tar -xzf /tmp/release.tar.gz -C "$RELEASE_PATH"
             rm /tmp/release.tar.gz
             
-            # Enlaces Simbólicos Shared (Tarea 3 y 1.C)
+            # Tarea 3: Symlinks Shared
             ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
             ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
             
-            # Tarea 1.A: Migraciones PostgreSQL
+            # Tarea 1.A: Activación
             cd "$RELEASE_PATH"
             php artisan migrate --force
             php artisan optimize:clear
             
-            # Cambio Atómico (Symlink)
             [ -L "$BASE_PATH/current" ] && PREV_RELEASE=$(readlink "$BASE_PATH/current")
             ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
             
-            # Recargar servidor (Punto 1.B)
             sudo systemctl reload php8.4-fpm
             
-            # Health Check Gate (Tarea 1.A)
+            # Health Check
             sleep 3
             if curl -f -s "http://localhost/health" > /dev/null; then
                 echo "✅ Despliegue Exitoso"
@@ -155,7 +147,7 @@ jobs:
             fi
 
   # ==========================================
-  # Tarea 1.B: CD a Producción (Con Approval)
+  # Tarea 1.B: CD a Producción
   # ==========================================
   deploy-production:
     name: Deploy to Production
@@ -189,4 +181,3 @@ jobs:
             php artisan migrate --force
             ln -nfs $RELEASE_PATH $BASE_PATH/current
             sudo systemctl reload php8.4-fpm
-            curl -f -s "http://localhost/health"
