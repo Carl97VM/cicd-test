@@ -1,0 +1,183 @@
+name: CI/CD - Sistema de Ventas (Laravel 12)
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  tags: ["v*"] # Despliegue a producción con tags semánticos
+
+jobs:
+  # ==========================================
+  # Tarea 4: Quality Gates (Backend + Frontend)
+  # ==========================================
+  quality-gates:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite, bcmath, intl, gd
+      
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install Dependencies
+        run: |
+          composer install --no-ansi --no-interaction --no-progress --prefer-dist
+          npm ci
+
+      - name: "Gate 1: Code Style (Pint + ESLint)"
+        run: |
+          ./vendor/bin/pint --test
+          npm run lint
+
+      - name: "Gate 2: Static Analysis (PHPStan)"
+        run: ./vendor/bin/phpstan analyse --memory-limit=1G
+
+      - name: "Gate 3: Tests (Backend + Frontend)"
+        run: |
+          php artisan test --env=testing
+          npm run test
+        env:
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ":memory:"
+
+  # ==========================================
+  # Tarea 2: Build Único (Promoción)
+  # ==========================================
+  build:
+    name: Build Release
+    needs: quality-gates
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup PHP & Node
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+      
+      - name: Production Build
+        run: |
+          composer install --no-dev --optimize-autoloader
+          npm ci
+          npm run build
+          # Tarea 1.D: Generar ID de versión para trazabilidad
+          date +%Y%m%d_%H%M%S > RELEASE_ID
+          tar -czf release.tar.gz .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-package
+          path: release.tar.gz
+          retention-days: 1
+
+  # ==========================================
+  # Tarea 1.A: CD a Staging (Atómico)
+  # ==========================================
+  deploy-staging:
+    name: Deploy to Staging
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-package
+
+      - name: Transfer & Atomic Deploy
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          script: |
+            set -e
+            TIMESTAMP=$(date +%Y%m%d%H%M%S)
+            BASE_PATH="/var/www/comprasventas"
+            RELEASE_PATH="$BASE_PATH/releases/$TIMESTAMP"
+            
+            echo "🚀 Iniciando despliegue en $RELEASE_PATH"
+            mkdir -p $RELEASE_PATH
+            
+            # Transferencia indirecta via SSH temporal
+            cat > /tmp/release.tar.gz
+            tar -xzf /tmp/release.tar.gz -C $RELEASE_PATH
+            
+            # Tarea 3: Enlaces Symlink compartidos
+            ln -nfs $BASE_PATH/shared/.env $RELEASE_PATH/.env
+            ln -nfs $BASE_PATH/shared/storage $RELEASE_PATH/storage
+            
+            # Tarea 1.A: Comandos Laravel
+            cd $RELEASE_PATH
+            php artisan migrate --force
+            php artisan optimize:clear
+            
+            # Switch Atómico (Punto 2)
+            if [ -L "$BASE_PATH/current" ]; then
+                PREV_RELEASE=$(readlink "$BASE_PATH/current")
+            fi
+            ln -nfs $RELEASE_PATH $BASE_PATH/current
+            
+            # Recarga PHP-FPM
+            sudo systemctl reload php8.3-fpm
+            
+            # Tarea 1.A: Health Check Gate
+            echo "🏥 Verificando salud..."
+            sleep 3
+            if curl -f -s "http://localhost/health" > /dev/null; then
+                echo "✅ Staging OK"
+            else
+                echo "❌ FALLO: Revertiendo a $PREV_RELEASE"
+                ln -nfs $PREV_RELEASE $BASE_PATH/current
+                exit 1
+            fi
+
+  # ==========================================
+  # Tarea 1.B: CD a Producción (Con Approval)
+  # ==========================================
+  deploy-production:
+    name: Deploy to Production
+    needs: deploy-staging
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: production # ⚠️ AQUÍ SE ACTIVA LA PAUSA DE APROBACIÓN
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-package
+
+      - name: Final Deploy to Production
+        uses: appleboy/ssh-action@v1.2.2
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          script: |
+            set -e
+            RELEASE_TAG="${{ github.ref_name }}"
+            BASE_PATH="/var/www/comprasventas"
+            RELEASE_PATH="$BASE_PATH/releases/$RELEASE_TAG"
+            
+            mkdir -p $RELEASE_PATH
+            tar -xzf - -C $RELEASE_PATH < release.tar.gz
+            
+            ln -nfs $BASE_PATH/shared/.env $RELEASE_PATH/.env
+            cd $RELEASE_PATH
+            php artisan migrate --force
+            ln -nfs $RELEASE_PATH $BASE_PATH/current
+            sudo systemctl reload php8.3-fpm
+            curl -f -s "http://localhost/health"
