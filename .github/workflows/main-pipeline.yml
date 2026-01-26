@@ -86,7 +86,7 @@ jobs:
     needs: build
     runs-on: self-hosted   # LA CLAVE DEL ÉXITO
     environment: APP_KEY    # Para que lea tus secretos de GitHub
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia3'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia3' || github.ref == 'refs/heads/ci-dia4'
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4
