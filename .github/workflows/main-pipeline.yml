@@ -121,9 +121,10 @@ jobs:
   deploy-production:
     name: Deploy to Production
     needs: deploy-staging
+    # CAMBIO CRÍTICO: Permitir que la rama ci-dia4 entre aquí
     if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/ci-dia4'
-    runs-on: ubuntu-latest
-    environment: production
+    runs-on: self-hosted # Usa tu servidor para evitar problemas de SSH externo
+    environment: APP_KEY # Reutilizamos el entorno que tiene tus 12 secretos corregidos
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4
@@ -131,31 +132,24 @@ jobs:
           name: app-package
 
       - name: Final Deploy to Production
-        uses: appleboy/ssh-action@v1.2.2
-        with:
-          host: ${{ secrets.PROD_HOST }}
-          username: ${{ secrets.PROD_USER }}
-          key: ${{ secrets.PROD_SSH_KEY }}
-          # PASAR EL ARCHIVO AL SCRIPT
-          stdin: ${{ github.workspace }}/release.tar.gz
-          script: |
-            set -e
-            RELEASE_TAG="${{ github.ref_name }}"
-            BASE_PATH="/var/www/comprasventas"
-            RELEASE_PATH="$BASE_PATH/releases/$RELEASE_TAG"
-            
-            mkdir -p "$RELEASE_PATH"
-            # Recibir el archivo desde stdin y extraerlo
-            cat > /tmp/prod_release.tar.gz
-            tar -xzf /tmp/prod_release.tar.gz -C "$RELEASE_PATH"
-            
-            # Tarea 3: Enlaces Shared (Punto 3)
-            ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
-            ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
-            
-            cd "$RELEASE_PATH"
-            php artisan migrate --force
-            
-            # Cambio Atómico (Punto 2)
-            ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
-            sudo systemctl reload php8.4-fpm
+        run: |
+          set -e
+          # Tarea 1.D: Identificador de versión (Tag o Rama)
+          RELEASE_ID=$(date +%Y%m%d%H%M%S)
+          BASE_PATH="/var/www/comprasventas"
+          RELEASE_PATH="$BASE_PATH/releases/prod-$RELEASE_ID"
+          
+          mkdir -p "$RELEASE_PATH"
+          tar -xzf release.tar.gz -C "$RELEASE_PATH"
+          
+          # Tarea 3: Enlaces Shared (Punto 3)
+          ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
+          ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
+          
+          # Tarea 1.A: Activación Atómica
+          cd "$RELEASE_PATH"
+          php artisan migrate --force
+          ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
+          
+          sudo systemctl reload php8.4-fpm
+          echo "🚀 Despliegue de Producción (ci-dia4) Exitoso"
