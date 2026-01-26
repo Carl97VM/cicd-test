@@ -3,9 +3,8 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Cache;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\DB;
 
 class HealthController extends Controller
 {
@@ -47,7 +46,7 @@ class HealthController extends Controller
 
         // 4. Metadatos de Release (Trazabilidad Punto 1.D)
         $totalLatency = round((microtime(true) - $start) * 1000, 2);
-        $isHealthy = collect($results)->every(fn($item) => $item['status'] === 'ok');
+        $isHealthy = collect($results)->every(fn ($item) => $item['status'] === 'ok');
 
         return response()->json([
             'status' => $isHealthy ? 'ok' : 'degraded',
@@ -61,7 +60,7 @@ class HealthController extends Controller
             'infrastructure' => $results,
             'performance' => [
                 'total_latency_ms' => $totalLatency,
-            ]
+            ],
         ], $isHealthy ? 200 : 503);
     }
 }
