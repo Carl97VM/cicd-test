@@ -88,7 +88,7 @@ jobs:
   deploy-staging:
     name: Deploy to Staging
     needs: build
-    runs-on: ubuntu-latest
+    # runs-on: ubuntu-latest
     environment: APP_KEY 
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia3'
     steps:
@@ -105,6 +105,8 @@ jobs:
           username: ${{ secrets.STAGING_USER }}
           key: ${{ secrets.STAGING_SSH_KEY }}
           port: 22
+          timeout: 120s
+          command_timeout: 20m
           source: "release.tar.gz"
           target: "/tmp"
 
