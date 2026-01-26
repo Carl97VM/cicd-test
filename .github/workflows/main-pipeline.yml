@@ -89,8 +89,8 @@ jobs:
     name: Deploy to Staging
     needs: build
     runs-on: ubuntu-latest
-    # ESTA LÍNEA ES CRÍTICA: Debe ser el nombre exacto de tu Environment
-    environment: staging 
+    environment: APP_KEY 
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia3'
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4
