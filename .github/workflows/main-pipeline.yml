@@ -88,7 +88,8 @@ jobs:
   deploy-staging:
     name: Deploy to Staging
     needs: build
-    if: github.ref == 'refs/heads/main'
+    # Cambia esto en el job deploy-staging:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia3'
     runs-on: ubuntu-latest
     environment: staging
     steps:
