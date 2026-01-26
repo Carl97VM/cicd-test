@@ -2,7 +2,7 @@ name: CI/CD - Sistema de Ventas (Laravel 12)
 
 on:
   push:
-    branches: ["main"]
+    branches: ["main", "ci-dia3"]
     tags: ["v*"] # Sintaxis corregida: ahora está dentro de push
   pull_request:
     branches: ["main"]
