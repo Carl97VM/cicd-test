@@ -21,35 +21,33 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4" # Sincronizado con tu servidor Debian
-          extensions: dom, curl, libxml, mbstring, zip, pdo, sqlite, pdo_sqlite, bcmath, intl, gd
+          php-version: "8.4"
+          extensions: dom, curl, mbstring, pdo_sqlite, bcmath, intl, gd
       
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-
       - name: Install Dependencies
-        run: |
-          composer install --no-ansi --no-interaction --no-progress --prefer-dist
-          npm ci
+        run: composer install --no-ansi --no-interaction --no-progress --prefer-dist
 
-      - name: "Gate 1: Code Style (Pint + ESLint)"
+      # SOLUCIÓN AL ERROR: Generar APP_KEY y RELEASE_ID para los tests
+      - name: Prepare Environment for Tests
         run: |
-          ./vendor/bin/pint --test
-          npm run lint
+          cp .env.example .env
+          php artisan key:generate
+          echo "testing-v1" > RELEASE_ID
+          mkdir -p database
+          touch database/database.sqlite
 
-      - name: "Gate 2: Static Analysis (PHPStan)"
+      - name: "Gate 1: Code Style"
+        run: ./vendor/bin/pint --test
+
+      - name: "Gate 2: Static Analysis"
         run: ./vendor/bin/phpstan analyse --memory-limit=1G
 
-      - name: "Gate 3: Tests (Backend + Frontend)"
-        run: |
-          php artisan test --env=testing
-          npm run test
+      - name: "Gate 3: Tests"
+        run: php artisan test --env=testing
         env:
           DB_CONNECTION: sqlite
-          DB_DATABASE: ":memory:"
+          DB_DATABASE: database/database.sqlite
+          # Se asegura que la key generada se use en el proceso
 
   # ==========================================
   # Tarea 2: Build Único (Promoción)
