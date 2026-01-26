@@ -86,24 +86,36 @@ jobs:
   # Tarea 1.A: CD a Staging (Atómico)
   # ==========================================
   deploy-staging:
+    name: Deploy to Staging
     needs: build
-    # Asegúrate de que este nombre coincida con donde guardaste los secretos
-    environment: staging 
     runs-on: ubuntu-latest
+    # ESTA LÍNEA ES CRÍTICA: Debe ser el nombre exacto de tu Environment
+    environment: staging 
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
           name: app-package
 
-      - name: Deploy via SSH
+      # Usamos SCP para subir el archivo (Tarea 2)
+      - name: Copy Artifact via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          port: 22
+          source: "release.tar.gz"
+          target: "/tmp"
+
+      # Ejecutamos el despliegue atómico (Tarea 1.A, 3 y 8)
+      - name: Execute Atomic Deploy via SSH
         uses: appleboy/ssh-action@v1.2.2
         with:
           host: ${{ secrets.STAGING_HOST }}
           username: ${{ secrets.STAGING_USER }}
           key: ${{ secrets.STAGING_SSH_KEY }}
-          # Enviamos el archivo tar.gz a través de la conexión
-          stdin: ${{ github.workspace }}/release.tar.gz
+          port: 22
           script: |
             set -e
             TIMESTAMP=$(date +%Y%m%d%H%M%S)
@@ -111,26 +123,34 @@ jobs:
             RELEASE_PATH="$BASE_PATH/releases/$TIMESTAMP"
             
             mkdir -p "$RELEASE_PATH"
-            # Recibimos el archivo y lo extraemos
-            cat > /tmp/release.tar.gz
             tar -xzf /tmp/release.tar.gz -C "$RELEASE_PATH"
+            rm /tmp/release.tar.gz
             
-            # Tarea 3: Enlaces Simbólicos Atómicos
+            # Enlaces Simbólicos Shared (Tarea 3 y 1.C)
             ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
             ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
             
             # Tarea 1.A: Migraciones PostgreSQL
             cd "$RELEASE_PATH"
             php artisan migrate --force
+            php artisan optimize:clear
             
-            # Cambio Atómico de Versión (Punto 2)
+            # Cambio Atómico (Symlink)
+            [ -L "$BASE_PATH/current" ] && PREV_RELEASE=$(readlink "$BASE_PATH/current")
             ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
             
-            # Recarga de PHP 8.4
+            # Recargar servidor (Punto 1.B)
             sudo systemctl reload php8.4-fpm
             
-            # Health Check (Tarea 1.A)
-            curl -f -s "http://localhost/health"
+            # Health Check Gate (Tarea 1.A)
+            sleep 3
+            if curl -f -s "http://localhost/health" > /dev/null; then
+                echo "✅ Despliegue Exitoso"
+            else
+                echo "❌ FALLO: Ejecutando Rollback"
+                [ ! -z "$PREV_RELEASE" ] && ln -nfs "$PREV_RELEASE" "$BASE_PATH/current"
+                exit 1
+            fi
 
   # ==========================================
   # Tarea 1.B: CD a Producción (Con Approval)
