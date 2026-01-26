@@ -2,7 +2,7 @@ name: CI/CD - Sistema de Ventas (Laravel 12)
 
 on:
   push:
-    branches: ["main", "ci-dia3"]
+    branches: ["main", "ci-dia3", "ci-dia4"]
     tags: ["v*"]
   pull_request:
     branches: ["main"]
@@ -121,7 +121,7 @@ jobs:
   deploy-production:
     name: Deploy to Production
     needs: deploy-staging
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/ci-dia4'
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -136,17 +136,26 @@ jobs:
           host: ${{ secrets.PROD_HOST }}
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
+          # PASAR EL ARCHIVO AL SCRIPT
+          stdin: ${{ github.workspace }}/release.tar.gz
           script: |
             set -e
             RELEASE_TAG="${{ github.ref_name }}"
             BASE_PATH="/var/www/comprasventas"
             RELEASE_PATH="$BASE_PATH/releases/$RELEASE_TAG"
             
-            mkdir -p $RELEASE_PATH
-            tar -xzf - -C $RELEASE_PATH < release.tar.gz
+            mkdir -p "$RELEASE_PATH"
+            # Recibir el archivo desde stdin y extraerlo
+            cat > /tmp/prod_release.tar.gz
+            tar -xzf /tmp/prod_release.tar.gz -C "$RELEASE_PATH"
             
-            ln -nfs $BASE_PATH/shared/.env $RELEASE_PATH/.env
-            cd $RELEASE_PATH
+            # Tarea 3: Enlaces Shared (Punto 3)
+            ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
+            ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
+            
+            cd "$RELEASE_PATH"
             php artisan migrate --force
-            ln -nfs $RELEASE_PATH $BASE_PATH/current
+            
+            # Cambio Atómico (Punto 2)
+            ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
             sudo systemctl reload php8.4-fpm
