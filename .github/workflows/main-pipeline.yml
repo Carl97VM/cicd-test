@@ -1,4 +1,4 @@
-name: CI/CD - Sistema de Ventas (Final)
+name: CI/CD - Sistema de Ventas (Final Absoluto)
 
 on:
   push:
@@ -14,11 +14,10 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.4"
+          php-version: "8.4" # Alineado con tus dependencias
           extensions: dom, curl, mbstring, pdo_sqlite, bcmath, intl, gd
       - name: Validate
         run: |
-          # Eliminamos el flag --progress que causó el error
           composer install --no-ansi --no-interaction --prefer-dist
           rm -f tests/Feature/ExampleTest.php
           cp .env.example .env && php artisan key:generate
@@ -35,12 +34,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4" # Crucial para que composer install no falle
       - name: Build
         run: |
           composer install --no-dev --optimize-autoloader
           npm ci && npm run build
           date +%Y%m%d_%H%M%S > RELEASE_ID
-          # Aislamiento total para evitar errores de tar
           tar -czf /tmp/release.tar.gz --exclude='./release.tar.gz' --exclude='./node_modules' .
           mv /tmp/release.tar.gz release.tar.gz
       - name: Upload
@@ -52,7 +54,7 @@ jobs:
   deploy-staging:
     name: Deploy to Staging
     needs: build
-    runs-on: self-hosted
+    runs-on: self-hosted # Aquí es donde tu Debian debe tener PHP 8.4
     steps:
       - name: Download
         uses: actions/download-artifact@v4
@@ -65,40 +67,31 @@ jobs:
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
           RELEASE_PATH="$BASE_PATH/releases/stg-$TIMESTAMP"
 
-          # 1. Infraestructura de Pre-vuelo
           mkdir -p "$BASE_PATH/shared/storage/framework"/{views,sessions,cache}
           mkdir -p "$BASE_PATH/shared/storage/logs"
           mkdir -p "$RELEASE_PATH"
           tar -xzf release.tar.gz -C "$RELEASE_PATH"
           
-          # 2. Configuración y Permisos ANTES de activar
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
           ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
           
-          # Reparación forzada de permisos
           sudo chown -R fellsing:www-data "$BASE_PATH/shared"
           sudo chmod -R 775 "$BASE_PATH/shared"
-          sudo chown -R fellsing:www-data "$RELEASE_PATH"
           
           cd "$RELEASE_PATH"
-          php artisan optimize:clear
-          php artisan migrate --force
+          # Usar el binario específico si tienes varias versiones
+          php8.4 artisan optimize:clear
+          php8.4 artisan migrate --force
           
-          # 3. Activación Atómica (Zero Downtime)
           ln -sfn "$RELEASE_PATH" "$BASE_PATH/current.new"
           mv -Tf "$BASE_PATH/current.new" "$BASE_PATH/current"
           sudo systemctl reload php8.4-fpm
           
-          # 4. Verificación con reintentos agresivos
           echo "Verificando salud..."
           sleep 15
           for i in {1..5}; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.100.63/api/health)
-            if [ $STATUS -eq 200 ]; then 
-              echo "✅ EXITOSO"; 
-              exit 0; 
-            fi
-            echo "⚠️ Intento $i: Status $STATUS. Reintentando..."
+            if [ $STATUS -eq 200 ]; then exit 0; fi
             sleep 5
           done
           exit 1
