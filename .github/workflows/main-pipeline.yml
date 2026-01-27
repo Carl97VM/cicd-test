@@ -95,43 +95,42 @@ jobs:
           BASE_PATH="/var/www/comprasventas"
           RELEASE_PATH="$BASE_PATH/releases/stg-$(date +%Y%m%d%H%M%S)"
           
-          # 1. Asegurar estructura ANTES de mover el código
+          # 1. Preparación de Infraestructura
           mkdir -p "$BASE_PATH/shared/storage/framework"/{views,sessions,cache}
           mkdir -p "$BASE_PATH/shared/storage/logs"
-          
           mkdir -p "$RELEASE_PATH"
           tar -xzf release.tar.gz -C "$RELEASE_PATH"
+          
+          # 2. Vinculación y Permisos Atómicos
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
           ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
-          
-          # 2. Aplicar permisos ANTES de activar el enlace simbólico
           sudo chown -R fellsing:www-data "$BASE_PATH/shared"
           sudo chmod -R 775 "$BASE_PATH/shared"
           
+          # 3. AUTO-REPARACIÓN (Mitigación de errores 503)
           cd "$RELEASE_PATH"
-          # Limpiar caché del nuevo release
+          php artisan up # Asegura que no esté en modo mantenimiento
           php artisan optimize:clear
+          php artisan view:cache # Pre-compila vistas para evitar fallos de escritura en el primer request
           php artisan migrate --force
           
-          # 3. ACTIVACIÓN ATÓMICA
+          # 4. ACTIVACIÓN
           ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
           sudo systemctl reload php8.4-fpm
           
-          # 4. SMOKE TEST RESILIENTE
-          echo "Verificando salud en Staging (Esperando estabilización)..."
-          sleep 10 # Tiempo extra para que PHP-FPM se estabilice
-          
-          for i in {1..5}; do # Aumentamos a 5 intentos
+          # 5. SMOKE TEST CON LOGS DE ERROR
+          echo "Verificando salud..."
+          sleep 5
+          for i in {1..5}; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.100.63/api/health)
             if [ $STATUS -eq 200 ]; then
-              echo "✅ Sistema Saludable (200 OK)"
+              echo "✅ Sistema Saludable"
               exit 0
             fi
-            echo "⚠️ Intento $i: Status $STATUS. Reintentando en 5s..."
+            echo "⚠️ Intento $i: Status $STATUS. Consultando logs..."
+            tail -n 5 "$BASE_PATH/shared/storage/logs/laravel.log" || true
             sleep 5
           done
-          
-          echo "❌ Fallo crítico: El sistema no recuperó la salud."
           exit 1
 
   # ==========================================
