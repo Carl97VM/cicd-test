@@ -45,6 +45,9 @@ jobs:
   # ==========================================
   # Tarea 2: Build Único (Promoción de Artefacto)
   # ==========================================
+# ==========================================
+  # Tarea 2: Build Único (Promoción de Artefacto)
+  # ==========================================
   build:
     name: Build Release
     needs: quality-gates
@@ -62,8 +65,11 @@ jobs:
           composer install --no-dev --optimize-autoloader
           npm ci && npm run build
           date +%Y%m%d_%H%M%S > RELEASE_ID
-          # MITIGACIÓN: Crear el tar fuera del directorio (.) o excluir el archivo resultante
-          tar --exclude='./release.tar.gz' -czf release.tar.gz .
+          
+          # SOLUCIÓN FINAL: Creamos el paquete en /tmp para evitar la recursividad 
+          # y usamos --warning=no-file-changed para ignorar cambios menores de logs
+          tar -czf /tmp/release.tar.gz --exclude='./release.tar.gz' --exclude='./node_modules' .
+          mv /tmp/release.tar.gz .
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
