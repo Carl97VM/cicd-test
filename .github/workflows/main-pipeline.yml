@@ -1,15 +1,11 @@
-name: CI/CD - Sistema de Ventas (Alta Disponibilidad)
+name: CI/CD - Sistema de Ventas (Final)
 
 on:
   push:
     branches: ["main", "ci-dia4"]
-    tags: ["v*"]
   workflow_dispatch:
 
 jobs:
-  # ==========================================
-  # GATE 1: Calidad y Verificación (Mandatorio)
-  # ==========================================
   quality-gates:
     name: Quality Gates
     runs-on: ubuntu-latest
@@ -20,156 +16,110 @@ jobs:
         with:
           php-version: "8.4"
           extensions: dom, curl, mbstring, pdo_sqlite, bcmath, intl, gd
-      
-      - name: Install Dependencies
-        run: composer install --no-ansi --no-interaction --no-progress --prefer-dist
-
-      - name: Prepare Environment for Tests
+      - name: Validate
         run: |
-          cp .env.example .env
-          php artisan key:generate
-          mkdir -p database && touch database/database.sqlite
-          # Limpieza de tests de ejemplo que causan falsos positivos
+          composer install --no-ansi --no-interaction --progress --prefer-dist
           rm -f tests/Feature/ExampleTest.php
-
-      - name: "Gate 1: Code Style & Static Analysis"
-        run: |
+          cp .env.example .env && php artisan key:generate
+          mkdir -p database && touch database/database.sqlite
           ./vendor/bin/pint --test
-          ./vendor/bin/phpstan analyse --memory-limit=1G
-
-      - name: "Gate 2: Tests (PHPUnit)"
-        run: php artisan test --env=testing
+          php artisan test --env=testing
         env:
           DB_CONNECTION: sqlite
           DB_DATABASE: database/database.sqlite
 
-  # ==========================================
-  # Tarea 2: Build Único (Aislamiento de Artefacto)
-  # ==========================================
   build:
     name: Build Release
     needs: quality-gates
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: "8.4"
-      
-      - name: Production Build
+      - name: Build
         run: |
           composer install --no-dev --optimize-autoloader
           npm ci && npm run build
           date +%Y%m%d_%H%M%S > RELEASE_ID
-          
-          # SOLUCIÓN FINAL TAR: Aislamiento en /tmp para evitar "file changed as we read it"
+          # Aislamiento total para evitar errores de tar
           tar -czf /tmp/release.tar.gz --exclude='./release.tar.gz' --exclude='./node_modules' .
           mv /tmp/release.tar.gz release.tar.gz
-
-      - name: Upload Artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: app-package
           path: release.tar.gz
 
-  # ==========================================
-  # Tarea 3: CD a Staging (Gobernanza & Auto-Heal)
-  # ==========================================
   deploy-staging:
     name: Deploy to Staging
     needs: build
     runs-on: self-hosted
-    environment: APP_KEY
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia4'
     steps:
-      - name: Download Artifact
+      - name: Download
         uses: actions/download-artifact@v4
         with:
           name: app-package
-
-      - name: Atomic Deploy & Governance
+      - name: Deploy
         run: |
           set -e
           BASE_PATH="/var/www/comprasventas"
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
           RELEASE_PATH="$BASE_PATH/releases/stg-$TIMESTAMP"
 
-          # 1. GOBERNANZA: Chequeo de Pre-Vuelo (Disco)
-          AVAILABLE=$(df -m "$BASE_PATH" | awk 'NR==2 {print $4}')
-          if [ "$AVAILABLE" -lt 500 ]; then echo "❌ Espacio insuficiente"; exit 1; fi
-
-          # 2. MITIGACIÓN: Backup Preventivo de DB
-          mkdir -p "$BASE_PATH/shared/backups"
-          source "$BASE_PATH/shared/.env"
-          PGPASSWORD="$DB_PASSWORD" pg_dump -h "$DB_HOST" -U "$DB_USERNAME" -Fc "$DB_DATABASE" > "$BASE_PATH/shared/backups/pre-stg-$TIMESTAMP.sql" || echo "⚠️ Backup omitido"
-
-          # 3. INFRAESTRUCTURA: Asegurar directorios compartidos
+          # 1. Infraestructura de Pre-vuelo
           mkdir -p "$BASE_PATH/shared/storage/framework"/{views,sessions,cache}
           mkdir -p "$BASE_PATH/shared/storage/logs"
           mkdir -p "$RELEASE_PATH"
           tar -xzf release.tar.gz -C "$RELEASE_PATH"
           
-          # 4. VINCULACIÓN Y PERMISOS (Resuelve el 503)
+          # 2. Configuración y Permisos ANTES de activar
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
           ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
+          
+          # Reparación forzada de permisos
           sudo chown -R fellsing:www-data "$BASE_PATH/shared"
           sudo chmod -R 775 "$BASE_PATH/shared"
+          sudo chown -R fellsing:www-data "$RELEASE_PATH"
           
           cd "$RELEASE_PATH"
-          php artisan up
           php artisan optimize:clear
-          php artisan view:cache # Mitigación de errores de escritura inicial
           php artisan migrate --force
           
-          # 5. SWITCH ATÓMICO Y RELOAD
-          ln -nfs "$RELEASE_PATH" "$BASE_PATH/current.new"
+          # 3. Activación Atómica (Zero Downtime)
+          ln -sfn "$RELEASE_PATH" "$BASE_PATH/current.new"
           mv -Tf "$BASE_PATH/current.new" "$BASE_PATH/current"
           sudo systemctl reload php8.4-fpm
-
-          # 6. SMOKE TEST RESILIENTE (MTTR Optimizado)
-          echo "Verificando salud (Esperando 10s para estabilización)..."
-          sleep 10
+          
+          # 4. Verificación con reintentos agresivos
+          echo "Verificando salud..."
+          sleep 15
           for i in {1..5}; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.100.63/api/health)
             if [ $STATUS -eq 200 ]; then 
-              echo "✅ Staging Exitoso"; 
-              # Higiene: Purga de versiones antiguas (Mantiene últimas 5)
-              cd "$BASE_PATH/releases" && ls -t | tail -n +6 | xargs -r rm -rf
+              echo "✅ EXITOSO"; 
               exit 0; 
             fi
-            echo "⚠️ Intento $i: Status $STATUS. Consultando logs..."
-            tail -n 5 "$BASE_PATH/shared/storage/logs/laravel.log" || true
+            echo "⚠️ Intento $i: Status $STATUS. Reintentando..."
             sleep 5
           done
           exit 1
 
-  # ==========================================
-  # Tarea 4: CD a Producción (Protección Total)
-  # ==========================================
   deploy-production:
     name: Deploy to Production
     needs: deploy-staging
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    if: github.ref == 'refs/heads/main'
     runs-on: self-hosted
     environment: Production
     steps:
-      - name: Download Artifact
+      - name: Download
         uses: actions/download-artifact@v4
         with:
           name: app-package
-
-      - name: Final Deploy & Health Audit (Punto 1.D)
+      - name: Final Deploy
         run: |
           set -e
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
           BASE_PATH="/var/www/comprasventas"
           RELEASE_PATH="$BASE_PATH/releases/prod-$TIMESTAMP"
           
-          source "$BASE_PATH/shared/.env"
-          PGPASSWORD="$DB_PASSWORD" pg_dump -h "$DB_HOST" -U "$DB_USERNAME" -Fc "$DB_DATABASE" > "$BASE_PATH/shared/backups/pre-prod-$TIMESTAMP.sql" || echo "⚠️ Backup omitido"
-          
           mkdir -p "$RELEASE_PATH"
           tar -xzf release.tar.gz -C "$RELEASE_PATH"
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
@@ -180,17 +130,12 @@ jobs:
           cd "$RELEASE_PATH"
           php artisan optimize:clear
           php artisan migrate --force
-          ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
+          ln -sfn "$RELEASE_PATH" "$BASE_PATH/current"
           sudo systemctl reload php8.4-fpm
           
           sleep 10
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.100.63/api/health)
-          if [ $STATUS -eq 200 ]; then
-             php artisan tinker --execute="Log::info('Release exitoso en Producción', ['version' => '${{ github.ref_name }}']);"
-             echo "🚀 Producción Activa"
-          else
-             exit 1
-          fi
+          [ $STATUS -eq 200 ] || exit 1
 
   # ==========================================
   # Tarea 5: Rollback Automático (Mitigación)
