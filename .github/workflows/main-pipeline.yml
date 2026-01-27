@@ -81,8 +81,7 @@ jobs:
     name: Deploy to Staging
     needs: build
     runs-on: self-hosted
-    environment: APP_KEY # Ambiente con sus propios secretos
-    # Staging sigue aceptando ramas de desarrollo para validación previa
+    environment: APP_KEY
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia3' || github.ref == 'refs/heads/ci-dia4'
     steps:
       - name: Download Artifact
@@ -97,23 +96,40 @@ jobs:
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
           RELEASE_PATH="$BASE_PATH/releases/stg-$TIMESTAMP"
           
+          # 1. Asegurar estructura Shared para evitar errores 503
+          mkdir -p "$BASE_PATH/shared/storage/framework/views"
+          mkdir -p "$BASE_PATH/shared/storage/framework/sessions"
+          mkdir -p "$BASE_PATH/shared/storage/framework/cache"
+          mkdir -p "$BASE_PATH/shared/storage/logs"
+          
+          # 2. Despliegue del paquete
           mkdir -p "$RELEASE_PATH"
           tar -xzf release.tar.gz -C "$RELEASE_PATH"
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
           ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
           
+          # 3. Permisos y Activación
+          sudo chown -R fellsing:www-data "$BASE_PATH/shared/storage"
+          sudo chmod -R 775 "$BASE_PATH/shared/storage"
+          
           cd "$RELEASE_PATH"
           php artisan migrate --force
-          ln -nfs "$RELEASE_PATH" "$BASE_PATH/current" # Switch Atómico
+          ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
           sudo systemctl reload php8.4-fpm
-
-          # MITIGACIÓN: Smoke Test (Health Check)
-          sleep 2
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.100.63/api/health)
-          if [ $STATUS -ne 200 ]; then
-            echo "❌ Health check fallido en Staging (Status $STATUS). Abortando."
-            exit 1
-          fi
+          
+          # 4. Mitigación: Smoke Test con reintentos
+          echo "Verificando salud en Staging..."
+          for i in {1..3}; do
+            sleep 5
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.100.63/api/health)
+            if [ $STATUS -eq 200 ]; then
+              echo "✅ Staging Saludable (200 OK)"
+              exit 0
+            fi
+            echo "⚠️ Intento $i: Status $STATUS, reintentando..."
+          done
+          echo "❌ Fallo crítico en Staging"
+          exit 1
 
   # ==========================================
   # Tarea 1.B: CD a Producción (PROTEGIDO)
@@ -121,11 +137,10 @@ jobs:
   deploy-production:
     name: Deploy to Production
     needs: deploy-staging
-    # RESTRICCIÓN: Solo Master/Main o Tags v* pueden llegar a Producción
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: self-hosted
     environment: 
-      name: Production # Obliga a que en GitHub exista el "Approval Gate"
+      name: Production
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4
@@ -152,12 +167,12 @@ jobs:
       - name: Health Check & Audit Log (Punto 1.D)
         run: |
           cd /var/www/comprasventas/current
-          # Verificación final de salud
+          sleep 5
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.100.63/api/health)
           if [ $STATUS -eq 200 ]; then
              php artisan tinker --execute="Log::info('Release exitoso en Producción', ['version' => '${{ github.ref_name }}', 'env' => 'production']);"
              echo "🚀 Despliegue de Producción Completado"
           else
-             echo "❌ Error crítico post-despliegue en Producción"
+             echo "❌ Error crítico post-despliegue en Producción (Status $STATUS)"
              exit 1
           fi
