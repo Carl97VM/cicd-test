@@ -18,7 +18,8 @@ jobs:
           extensions: dom, curl, mbstring, pdo_sqlite, bcmath, intl, gd
       - name: Validate
         run: |
-          composer install --no-ansi --no-interaction --progress --prefer-dist
+          # Eliminamos el flag --progress que causó el error
+          composer install --no-ansi --no-interaction --prefer-dist
           rm -f tests/Feature/ExampleTest.php
           cp .env.example .env && php artisan key:generate
           mkdir -p database && touch database/database.sqlite
