@@ -62,7 +62,8 @@ jobs:
           composer install --no-dev --optimize-autoloader
           npm ci && npm run build
           date +%Y%m%d_%H%M%S > RELEASE_ID
-          tar -czf release.tar.gz .
+          # MITIGACIÓN: Crear el tar fuera del directorio (.) o excluir el archivo resultante
+          tar --exclude='./release.tar.gz' -czf release.tar.gz .
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
