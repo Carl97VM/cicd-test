@@ -2,15 +2,13 @@ name: CI/CD - Sistema de Ventas (Laravel 12)
 
 on:
   push:
-    branches: ["main", "ci-dia3", "ci-dia4"]
+    branches: ["main", "ci-dia4"]
     tags: ["v*"]
-  pull_request:
-    branches: ["main"]
   workflow_dispatch:
 
 jobs:
   # ==========================================
-  # GATE 1: Calidad y Verificación
+  # GATE 1: Calidad y Verificación (Mandatorio)
   # ==========================================
   quality-gates:
     name: Quality Gates
@@ -33,20 +31,19 @@ jobs:
           echo "testing-v1" > RELEASE_ID
           mkdir -p database && touch database/database.sqlite
 
-      - name: "Gate 1: Code Style"
-        run: ./vendor/bin/pint --test
+      - name: "Gate 1: Code Style & Static Analysis"
+        run: |
+          ./vendor/bin/pint --test
+          ./vendor/bin/phpstan analyse --memory-limit=1G
 
-      - name: "Gate 2: Static Analysis"
-        run: ./vendor/bin/phpstan analyse --memory-limit=1G
-
-      - name: "Gate 3: Tests"
+      - name: "Gate 2: Tests"
         run: php artisan test --env=testing
         env:
           DB_CONNECTION: sqlite
           DB_DATABASE: database/database.sqlite
 
   # ==========================================
-  # Tarea 2: Build Único
+  # Tarea 2: Build Único (Promoción de Artefacto)
   # ==========================================
   build:
     name: Build Release
@@ -65,8 +62,7 @@ jobs:
           composer install --no-dev --optimize-autoloader
           npm ci && npm run build
           date +%Y%m%d_%H%M%S > RELEASE_ID
-          tar -czf ../release.tar.gz .
-          mv ../release.tar.gz .
+          tar -czf release.tar.gz .
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -75,57 +71,69 @@ jobs:
           path: release.tar.gz
 
   # ==========================================
-  # Tarea 1.A: CD a Staging (Con Mitigación)
+  # Tarea 3: CD a Staging (Con Gobernanza)
   # ==========================================
   deploy-staging:
     name: Deploy to Staging
     needs: build
     runs-on: self-hosted
     environment: APP_KEY
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia3' || github.ref == 'refs/heads/ci-dia4'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/ci-dia4'
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
           name: app-package
 
-      - name: Atomic Deploy & Health Check Gate
+      - name: Atomic Deploy & Governance
         run: |
           set -e
           BASE_PATH="/var/www/comprasventas"
-          RELEASE_PATH="$BASE_PATH/releases/stg-$(date +%Y%m%d%H%M%S)"
-          
-          # 1. Preparación de Infraestructura
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          RELEASE_PATH="$BASE_PATH/releases/stg-$TIMESTAMP"
+
+          # 1. GOBERNANZA: Chequeo de Pre-Vuelo (Disco)
+          AVAILABLE=$(df -m "$BASE_PATH" | awk 'NR==2 {print $4}')
+          if [ "$AVAILABLE" -lt 500 ]; then echo "❌ Espacio insuficiente"; exit 1; fi
+
+          # 2. MITIGACIÓN: Backup Preventivo de DB
+          mkdir -p "$BASE_PATH/shared/backups"
+          source "$BASE_PATH/shared/.env"
+          PGPASSWORD="$DB_PASSWORD" pg_dump -h "$DB_HOST" -U "$DB_USERNAME" -Fc "$DB_DATABASE" > "$BASE_PATH/shared/backups/pre-stg-$TIMESTAMP.sql" || echo "⚠️ Backup omitido"
+
+          # 3. INFRAESTRUCTURA: Asegurar directorios compartidos
           mkdir -p "$BASE_PATH/shared/storage/framework"/{views,sessions,cache}
           mkdir -p "$BASE_PATH/shared/storage/logs"
           mkdir -p "$RELEASE_PATH"
           tar -xzf release.tar.gz -C "$RELEASE_PATH"
           
-          # 2. Vinculación y Permisos Atómicos
+          # 4. VINCULACIÓN Y PERMISOS (Auto-Heal)
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
           ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
           sudo chown -R fellsing:www-data "$BASE_PATH/shared"
           sudo chmod -R 775 "$BASE_PATH/shared"
           
-          # 3. AUTO-REPARACIÓN (Mitigación de errores 503)
           cd "$RELEASE_PATH"
-          php artisan up # Asegura que no esté en modo mantenimiento
+          php artisan up
           php artisan optimize:clear
-          php artisan view:cache # Pre-compila vistas para evitar fallos de escritura en el primer request
+          php artisan view:cache # Mitigación de errores de escritura inicial
           php artisan migrate --force
           
-          # 4. ACTIVACIÓN
-          ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
+          # 5. SWITCH ATÓMICO Y LIMPIEZA
+          ln -nfs "$RELEASE_PATH" "$BASE_PATH/current.new"
+          mv -Tf "$BASE_PATH/current.new" "$BASE_PATH/current"
           sudo systemctl reload php8.4-fpm
-          
-          # 5. SMOKE TEST CON LOGS DE ERROR
+
+          # 6. SMOKE TEST RESILIENTE
           echo "Verificando salud..."
           sleep 5
           for i in {1..5}; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.100.63/api/health)
-            if [ $STATUS -eq 200 ]; then
-              echo "✅ Sistema Saludable"
-              exit 0
+            if [ $STATUS -eq 200 ]; then 
+              echo "✅ Staging Exitoso"; 
+              # Purga de versiones antiguas (Mantiene últimas 5)
+              cd "$BASE_PATH/releases" && ls -t | tail -n +6 | xargs -r rm -rf
+              exit 0; 
             fi
             echo "⚠️ Intento $i: Status $STATUS. Consultando logs..."
             tail -n 5 "$BASE_PATH/shared/storage/logs/laravel.log" || true
@@ -134,38 +142,36 @@ jobs:
           exit 1
 
   # ==========================================
-  # Tarea 1.B: CD a Producción (Protegido e Infalible)
+  # Tarea 4: CD a Producción (Protección Total)
   # ==========================================
   deploy-production:
     name: Deploy to Production
     needs: deploy-staging
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: self-hosted
-    environment: 
-      name: Production
+    environment: Production
     steps:
       - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
           name: app-package
 
-      - name: Final Deploy to Production
+      - name: Final Deploy & Health Audit
         run: |
           set -e
-          RELEASE_ID=$(date +%Y%m%d%H%M%S)
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
           BASE_PATH="/var/www/comprasventas"
-          RELEASE_PATH="$BASE_PATH/releases/prod-$RELEASE_ID"
+          RELEASE_PATH="$BASE_PATH/releases/prod-$TIMESTAMP"
           
-          # CORRECCIÓN: Aplicar la misma mitigación que en Staging
-          mkdir -p "$BASE_PATH/shared/storage/framework"/{views,sessions,cache}
-          mkdir -p "$BASE_PATH/shared/storage/logs"
+          # 1. Backup de Seguridad en Producción
+          source "$BASE_PATH/shared/.env"
+          PGPASSWORD="$DB_PASSWORD" pg_dump -h "$DB_HOST" -U "$DB_USERNAME" -Fc "$DB_DATABASE" > "$BASE_PATH/shared/backups/pre-prod-$TIMESTAMP.sql" || echo "⚠️ Backup omitido"
           
+          # 2. Despliegue con Mitigación de Permisos
           mkdir -p "$RELEASE_PATH"
           tar -xzf release.tar.gz -C "$RELEASE_PATH"
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
           ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
-          
-          # CORRECCIÓN: Asegurar permisos en Producción
           sudo chown -R fellsing:www-data "$BASE_PATH/shared"
           sudo chmod -R 775 "$BASE_PATH/shared"
           
@@ -174,16 +180,33 @@ jobs:
           php artisan migrate --force
           ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
           sudo systemctl reload php8.4-fpm
-
-      - name: Health Check & Audit Log (Punto 1.D)
-        run: |
-          cd /var/www/comprasventas/current
-          sleep 5
+          
+          # 3. Auditoría de Health Check Final (Punto 1.D)
+          sleep 10
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.100.63/api/health)
           if [ $STATUS -eq 200 ]; then
-             php artisan tinker --execute="Log::info('Release exitoso en Producción', ['version' => '${{ github.ref_name }}', 'env' => 'production']);"
-             echo "🚀 Despliegue de Producción Completado"
+             php artisan tinker --execute="Log::info('Release exitoso en Producción', ['version' => '${{ github.ref_name }}']);"
+             echo "🚀 Producción Activa"
           else
-             echo "❌ Error crítico post-despliegue en Producción (Status $STATUS)"
+             echo "❌ Error Crítico: Status $STATUS"
              exit 1
+          fi
+
+  # ==========================================
+  # Tarea 5: Rollback Automático (Opcional)
+  # ==========================================
+  rollback:
+    name: Automatic Rollback
+    needs: [deploy-staging, deploy-production]
+    if: failure()
+    runs-on: self-hosted
+    steps:
+      - name: Recover Last Stable Release
+        run: |
+          BASE_PATH="/var/www/comprasventas"
+          PREVIOUS=$(ls -td $BASE_PATH/releases/stg-* | sed -n '2p')
+          if [ -n "$PREVIOUS" ]; then
+            ln -sfn "$PREVIOUS" "$BASE_PATH/current"
+            sudo systemctl reload php8.4-fpm
+            echo "🔙 Rollback ejecutado correctamente"
           fi
