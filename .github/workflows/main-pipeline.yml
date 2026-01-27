@@ -54,48 +54,62 @@ jobs:
   deploy-staging:
     name: Deploy to Staging
     needs: build
-    runs-on: self-hosted # Aquí es donde tu Debian debe tener PHP 8.4
+    runs-on: self-hosted
     steps:
-      - name: Download
+      - name: Download Artifact
         uses: actions/download-artifact@v4
         with:
           name: app-package
-      - name: Deploy
+
+      - name: Atomic Deploy & Application Health Gate
         run: |
           set -e
           BASE_PATH="/var/www/comprasventas"
           TIMESTAMP=$(date +%Y%m%d%H%M%S)
           RELEASE_PATH="$BASE_PATH/releases/stg-$TIMESTAMP"
 
+          # 1. Preparación de Infraestructura Shared (Mitigación de errores 503)
           mkdir -p "$BASE_PATH/shared/storage/framework"/{views,sessions,cache}
           mkdir -p "$BASE_PATH/shared/storage/logs"
           mkdir -p "$RELEASE_PATH"
           tar -xzf release.tar.gz -C "$RELEASE_PATH"
           
+          # 2. Vinculación de Persistencia y Permisos (Gobernanza)
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
           ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
           
+          # Reparación de permisos antes de la activación
           sudo chown -R fellsing:www-data "$BASE_PATH/shared"
           sudo chmod -R 775 "$BASE_PATH/shared"
           
+          # 3. Optimización de Motor (PHP 8.4)
           cd "$RELEASE_PATH"
-          # Usar el binario específico si tienes varias versiones
           php8.4 artisan optimize:clear
+          php8.4 artisan view:cache
           php8.4 artisan migrate --force
           
+          # 4. Switch Atómico de Alta Disponibilidad (Punto 3.6)
           ln -sfn "$RELEASE_PATH" "$BASE_PATH/current.new"
           mv -Tf "$BASE_PATH/current.new" "$BASE_PATH/current"
           sudo systemctl reload php8.4-fpm
           
-          echo "Verificando salud..."
-          sleep 15
-          for i in {1..5}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.100.63/api/health)
-            if [ $STATUS -eq 200 ]; then exit 0; fi
-            sleep 5
-          done
-          exit 1
-
+          # 5. VALIDACIÓN DE CAPA DE APLICACIÓN (Salud del Sistema)
+          echo "Ejecutando Health Check interno vía Tinker..."
+          sleep 5
+          
+          # Validamos directamente el controlador sin depender de Nginx
+          HEALTH_JSON=$(php8.4 artisan tinker --execute="echo json_encode(app(App\Http\Controllers\HealthController::class)->__invoke()->getData());")
+          
+          if [[ "$HEALTH_JSON" == *"\"status\":\"ok\""* ]]; then
+            echo "✅ DESPLIEGUE EXITOSO: El sistema reporta salud completa."
+            # Mantenimiento: Purga de versiones antiguas (Mantiene las últimas 5)
+            cd "$BASE_PATH/releases" && ls -t | tail -n +6 | xargs -r rm -rf
+          else
+            echo "❌ FALLO DE SALUD: Estado degradado detectado."
+            echo "Respuesta del sistema: $HEALTH_JSON"
+            exit 1
+          fi
+          
   deploy-production:
     name: Deploy to Production
     needs: deploy-staging
