@@ -10,7 +10,7 @@ on:
 
 jobs:
   # ==========================================
-  # GATE 1: Calidad y Verificación (Mandatorio)
+  # GATE 1: Calidad y Verificación
   # ==========================================
   quality-gates:
     name: Quality Gates
@@ -33,20 +33,20 @@ jobs:
           echo "testing-v1" > RELEASE_ID
           mkdir -p database && touch database/database.sqlite
 
-      - name: "Gate 1: Code Style (Pint)"
+      - name: "Gate 1: Code Style"
         run: ./vendor/bin/pint --test
 
-      - name: "Gate 2: Static Analysis (PHPStan)"
+      - name: "Gate 2: Static Analysis"
         run: ./vendor/bin/phpstan analyse --memory-limit=1G
 
-      - name: "Gate 3: Tests (PHPUnit)"
+      - name: "Gate 3: Tests"
         run: php artisan test --env=testing
         env:
           DB_CONNECTION: sqlite
           DB_DATABASE: database/database.sqlite
 
   # ==========================================
-  # Tarea 2: Build Único (Promoción de Artefacto)
+  # Tarea 2: Build Único
   # ==========================================
   build:
     name: Build Release
@@ -75,7 +75,7 @@ jobs:
           path: release.tar.gz
 
   # ==========================================
-  # Tarea 1.A: CD a Staging (Automático)
+  # Tarea 1.A: CD a Staging (Con Mitigación)
   # ==========================================
   deploy-staging:
     name: Deploy to Staging
@@ -93,9 +93,10 @@ jobs:
         run: |
           set -e
           BASE_PATH="/var/www/comprasventas"
-          RELEASE_PATH="$BASE_PATH/releases/stg-$(date +%Y%m%d%H%M%S)"
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          RELEASE_PATH="$BASE_PATH/releases/stg-$TIMESTAMP"
           
-          # 1. Mitigación: Asegurar estructura en cada deploy
+          # 1. Mitigación: Asegurar estructura (Lo que hicimos por consola)
           mkdir -p "$BASE_PATH/shared/storage/framework"/{views,sessions,cache}
           mkdir -p "$BASE_PATH/shared/storage/logs"
           
@@ -104,19 +105,18 @@ jobs:
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
           ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
           
-          # 2. Permisos automáticos (Requiere visudo configurado)
+          # 2. Permisos automáticos (Visudo)
           sudo chown -R fellsing:www-data "$BASE_PATH/shared"
           sudo chmod -R 775 "$BASE_PATH/shared"
           
-          # 3. Limpieza de estado antes del check
+          # 3. Limpieza y Activación
           cd "$RELEASE_PATH"
           php artisan optimize:clear
           php artisan migrate --force
-          
           ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
           sudo systemctl reload php8.4-fpm
           
-          # 4. Smoke Test con reintentos
+          # 4. Smoke Test
           for i in {1..3}; do
             sleep 5
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.100.63/api/health)
@@ -126,7 +126,7 @@ jobs:
           exit 1
 
   # ==========================================
-  # Tarea 1.B: CD a Producción (PROTEGIDO)
+  # Tarea 1.B: CD a Producción (Protegido e Infalible)
   # ==========================================
   deploy-production:
     name: Deploy to Production
@@ -148,12 +148,21 @@ jobs:
           BASE_PATH="/var/www/comprasventas"
           RELEASE_PATH="$BASE_PATH/releases/prod-$RELEASE_ID"
           
+          # CORRECCIÓN: Aplicar la misma mitigación que en Staging
+          mkdir -p "$BASE_PATH/shared/storage/framework"/{views,sessions,cache}
+          mkdir -p "$BASE_PATH/shared/storage/logs"
+          
           mkdir -p "$RELEASE_PATH"
           tar -xzf release.tar.gz -C "$RELEASE_PATH"
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
           ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
           
+          # CORRECCIÓN: Asegurar permisos en Producción
+          sudo chown -R fellsing:www-data "$BASE_PATH/shared"
+          sudo chmod -R 775 "$BASE_PATH/shared"
+          
           cd "$RELEASE_PATH"
+          php artisan optimize:clear
           php artisan migrate --force
           ln -nfs "$RELEASE_PATH" "$BASE_PATH/current"
           sudo systemctl reload php8.4-fpm
