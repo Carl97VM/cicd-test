@@ -62,58 +62,106 @@ jobs:
         with:
           name: app-package
 
-      - name: Atomic Deploy & Health Verification
+      # - name: Atomic Deploy & Health Verification
+      #   run: |
+      #     set -e
+      #     BASE_PATH="/var/www/comprasventas"
+      #     TIMESTAMP=$(date +%Y%m%d%H%M%S)
+      #     RELEASE_PATH="$BASE_PATH/releases/stg-$TIMESTAMP"
+
+      #     # 1. GOBERNANZA: Estructura y Backup
+      #     mkdir -p "$BASE_PATH/shared/backups"
+      #     source "$BASE_PATH/shared/.env"
+      #     PGPASSWORD="$DB_PASSWORD" pg_dump -h "$DB_HOST" -U "$DB_USERNAME" -Fc "$DB_DATABASE" > "$BASE_PATH/shared/backups/pre-stg-$TIMESTAMP.sql" || echo "Backup skipped"
+
+      #     # Asegurar que existan todas las subcarpetas necesarias en shared
+      #     mkdir -p "$BASE_PATH/shared/storage"/{app,framework/views,framework/sessions,framework/cache,logs}
+      #     mkdir -p "$RELEASE_PATH"
+      #     tar -xzf release.tar.gz -C "$RELEASE_PATH"
+          
+      #     # 2. VINCULACIÓN
+      #     ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
+      #     ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
+          
+      #     # 3. PERMISOS INTEGRALES (Solución al Storage False)
+      #     # Primero: shared/storage para escritura de datos
+      #     sudo chown -R fellsing:www-data "$BASE_PATH/shared/storage"
+      #     sudo chmod -R 775 "$BASE_PATH/shared/storage"
+          
+      #     # Segundo: El release actual (bootstrap/cache es vital)
+      #     sudo chown -R fellsing:www-data "$RELEASE_PATH"
+      #     sudo chmod -R 775 "$RELEASE_PATH/bootstrap/cache"
+          
+      #     # 4. ACTIVACIÓN DE MOTOR
+      #     cd "$RELEASE_PATH"
+      #     php8.4 artisan optimize:clear
+      #     php8.4 artisan migrate --force
+          
+      #     # 5. SWITCH ATÓMICO
+      #     ln -sfn "$RELEASE_PATH" "$BASE_PATH/current.new"
+      #     mv -Tf "$BASE_PATH/current.new" "$BASE_PATH/current"
+      #     sudo systemctl reload php8.4-fpm
+
+      #     # 6. HEALTH CHECK DE CAJA BLANCA (Requisito 3.7)
+      #     echo "Validando integridad del sistema..."
+      #     sleep 5
+      #     HEALTH_JSON=$(php8.4 artisan tinker --execute="echo json_encode(app(App\Http\Controllers\HealthController::class)->__invoke()->getData());")
+          
+      #     # Verificación estricta de la cadena de salud
+      #     if [[ "$HEALTH_JSON" == *"\"status\":\"ok\""* && "$HEALTH_JSON" == *"\"storage\":{\"ok\":true}"* ]]; then
+      #       echo "✅ SISTEMA ÓPTIMO: Salud verificada al 100%."
+      #       cd "$BASE_PATH/releases" && ls -t | tail -n +6 | xargs -r rm -rf
+      #     else
+      #       echo "❌ FALLO DE SALUD: Estado degradado detectado."
+      #       echo "Respuesta del sistema: $HEALTH_JSON"
+      #       exit 1
+      #     fi
+      - name: Atomic Deploy & Application Health Gate
         run: |
           set -e
           BASE_PATH="/var/www/comprasventas"
-          TIMESTAMP=$(date +%Y%m%d%H%M%S)
-          RELEASE_PATH="$BASE_PATH/releases/stg-$TIMESTAMP"
-
-          # 1. GOBERNANZA: Estructura y Backup
-          mkdir -p "$BASE_PATH/shared/backups"
-          source "$BASE_PATH/shared/.env"
-          PGPASSWORD="$DB_PASSWORD" pg_dump -h "$DB_HOST" -U "$DB_USERNAME" -Fc "$DB_DATABASE" > "$BASE_PATH/shared/backups/pre-stg-$TIMESTAMP.sql" || echo "Backup skipped"
-
-          # Asegurar que existan todas las subcarpetas necesarias en shared
-          mkdir -p "$BASE_PATH/shared/storage"/{app,framework/views,framework/sessions,framework/cache,logs}
+          RELEASE_PATH="$BASE_PATH/releases/stg-$(date +%Y%m%d%H%M%S)"
+          
+          # 1. Asegurar Infraestructura Shared
+          mkdir -p "$BASE_PATH/shared/storage/framework"/{views,sessions,cache}
+          mkdir -p "$BASE_PATH/shared/storage/logs"
           mkdir -p "$RELEASE_PATH"
           tar -xzf release.tar.gz -C "$RELEASE_PATH"
           
-          # 2. VINCULACIÓN
+          # 2. Vínculos y Permisos Críticos (REFORZADO)
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
           ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
           
-          # 3. PERMISOS INTEGRALES (Solución al Storage False)
-          # Primero: shared/storage para escritura de datos
+          # Reparación profunda de permisos: shared y release actual
           sudo chown -R fellsing:www-data "$BASE_PATH/shared/storage"
           sudo chmod -R 775 "$BASE_PATH/shared/storage"
-          
-          # Segundo: El release actual (bootstrap/cache es vital)
           sudo chown -R fellsing:www-data "$RELEASE_PATH"
           sudo chmod -R 775 "$RELEASE_PATH/bootstrap/cache"
           
-          # 4. ACTIVACIÓN DE MOTOR
+          # 3. Optimización y Limpieza de Vistas (Vital para el Storage True)
           cd "$RELEASE_PATH"
           php8.4 artisan optimize:clear
+          php8.4 artisan view:clear # Limpia vistas viejas que pueden dar falsos negativos
           php8.4 artisan migrate --force
           
-          # 5. SWITCH ATÓMICO
+          # 4. Activación Atómica
           ln -sfn "$RELEASE_PATH" "$BASE_PATH/current.new"
           mv -Tf "$BASE_PATH/current.new" "$BASE_PATH/current"
           sudo systemctl reload php8.4-fpm
-
-          # 6. HEALTH CHECK DE CAJA BLANCA (Requisito 3.7)
-          echo "Validando integridad del sistema..."
+          
+          # 5. VALIDACIÓN ESTRICTA (Gate de Maestría)
+          echo "Verificando salud interna del sistema..."
           sleep 5
           HEALTH_JSON=$(php8.4 artisan tinker --execute="echo json_encode(app(App\Http\Controllers\HealthController::class)->__invoke()->getData());")
           
-          # Verificación estricta de la cadena de salud
+          echo "Resultado interno: $HEALTH_JSON"
+
+          # El Gate ahora FALLARÁ si storage es false, cumpliendo el requisito de calidad
           if [[ "$HEALTH_JSON" == *"\"status\":\"ok\""* && "$HEALTH_JSON" == *"\"storage\":{\"ok\":true}"* ]]; then
             echo "✅ SISTEMA ÓPTIMO: Salud verificada al 100%."
             cd "$BASE_PATH/releases" && ls -t | tail -n +6 | xargs -r rm -rf
           else
-            echo "❌ FALLO DE SALUD: Estado degradado detectado."
-            echo "Respuesta del sistema: $HEALTH_JSON"
+            echo "❌ FALLO CRÍTICO: El sistema reporta estado DEGRADADO."
             exit 1
           fi
 
