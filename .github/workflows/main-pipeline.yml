@@ -62,92 +62,63 @@ jobs:
         with:
           name: app-package
 
-      # - name: Atomic Deploy & Health Verification
-      #   run: |
-      #     set -e
-      #     BASE_PATH="/var/www/comprasventas"
-      #     TIMESTAMP=$(date +%Y%m%d%H%M%S)
-      #     RELEASE_PATH="$BASE_PATH/releases/stg-$TIMESTAMP"
-
-      #     # 1. GOBERNANZA: Estructura y Backup
-      #     mkdir -p "$BASE_PATH/shared/backups"
-      #     source "$BASE_PATH/shared/.env"
-      #     PGPASSWORD="$DB_PASSWORD" pg_dump -h "$DB_HOST" -U "$DB_USERNAME" -Fc "$DB_DATABASE" > "$BASE_PATH/shared/backups/pre-stg-$TIMESTAMP.sql" || echo "Backup skipped"
-
-      #     # Asegurar que existan todas las subcarpetas necesarias en shared
-      #     mkdir -p "$BASE_PATH/shared/storage"/{app,framework/views,framework/sessions,framework/cache,logs}
-      #     mkdir -p "$RELEASE_PATH"
-      #     tar -xzf release.tar.gz -C "$RELEASE_PATH"
-          
-      #     # 2. VINCULACIÓN
-      #     ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
-      #     ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
-          
-      #     # 3. PERMISOS INTEGRALES (Solución al Storage False)
-      #     # Primero: shared/storage para escritura de datos
-      #     sudo chown -R fellsing:www-data "$BASE_PATH/shared/storage"
-      #     sudo chmod -R 775 "$BASE_PATH/shared/storage"
-          
-      #     # Segundo: El release actual (bootstrap/cache es vital)
-      #     sudo chown -R fellsing:www-data "$RELEASE_PATH"
-      #     sudo chmod -R 775 "$RELEASE_PATH/bootstrap/cache"
-          
-      #     # 4. ACTIVACIÓN DE MOTOR
-      #     cd "$RELEASE_PATH"
-      #     php8.4 artisan optimize:clear
-      #     php8.4 artisan migrate --force
-          
-      #     # 5. SWITCH ATÓMICO
-      #     ln -sfn "$RELEASE_PATH" "$BASE_PATH/current.new"
-      #     mv -Tf "$BASE_PATH/current.new" "$BASE_PATH/current"
-      #     sudo systemctl reload php8.4-fpm
-
-      #     # 6. HEALTH CHECK DE CAJA BLANCA (Requisito 3.7)
-      #     echo "Validando integridad del sistema..."
-      #     sleep 5
-      #     HEALTH_JSON=$(php8.4 artisan tinker --execute="echo json_encode(app(App\Http\Controllers\HealthController::class)->__invoke()->getData());")
-          
-      #     # Verificación estricta de la cadena de salud
-      #     if [[ "$HEALTH_JSON" == *"\"status\":\"ok\""* && "$HEALTH_JSON" == *"\"storage\":{\"ok\":true}"* ]]; then
-      #       echo "✅ SISTEMA ÓPTIMO: Salud verificada al 100%."
-      #       cd "$BASE_PATH/releases" && ls -t | tail -n +6 | xargs -r rm -rf
-      #     else
-      #       echo "❌ FALLO DE SALUD: Estado degradado detectado."
-      #       echo "Respuesta del sistema: $HEALTH_JSON"
-      #       exit 1
-      #     fi
-      # 
       - name: Atomic Deploy & Application Health Gate
         run: |
           set -e
           BASE_PATH="/var/www/comprasventas"
           RELEASE_PATH="$BASE_PATH/releases/stg-$(date +%Y%m%d%H%M%S)"
           
-          mkdir -p "$BASE_PATH/shared/storage"/{app,framework/views,framework/sessions,framework/cache,logs}
+          # 1. Extracción y Limpieza de Manifiestos Viejos
           mkdir -p "$RELEASE_PATH"
           tar -xzf release.tar.gz -C "$RELEASE_PATH"
-          
-          # Limpieza preventiva de caché hardcodeado
+          # ELIMINAR CACHÉ HEREDADA: Vital para evitar el status 'degraded'
           rm -f "$RELEASE_PATH/bootstrap/cache"/*.php
           
+          # 2. Re-vinculación de Infraestructura (Punto 3.6)
+          # Eliminamos cualquier carpeta storage física que venga en el artefacto
+          rm -rf "$RELEASE_PATH/storage"
+          mkdir -p "$BASE_PATH/shared/storage/framework"/{views,sessions,cache/data}
+          
+          # Enlaces simbólicos críticos
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
           ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
           
-          sudo chown -R fellsing:www-data "$BASE_PATH/shared/storage" "$RELEASE_PATH"
-          sudo chmod -R 775 "$BASE_PATH/shared/storage" "$RELEASE_PATH/bootstrap/cache"
+          # 3. GOBERNANZA DE PERMISOS (Punto 5 y 8)
+          # Aplicamos propiedad y bit de herencia para que www-data siempre pueda escribir
+          sudo chown -R fellsing:www-data "$BASE_PATH/shared/storage"
+          sudo chown -R fellsing:www-data "$RELEASE_PATH"
+          sudo chmod -R 2775 "$BASE_PATH/shared/storage"
+          sudo chmod -R 775 "$RELEASE_PATH/bootstrap/cache"
           
+          # 4. OPTIMIZACIÓN DESDE CERO
           cd "$RELEASE_PATH"
+          php8.4 artisan config:clear
           php8.4 artisan optimize:clear
-          php8.4 artisan view:clear
+          php8.4 artisan view:clear # Limpia restos de compilaciones previas
           php8.4 artisan migrate --force
           
+          # 5. ACTIVACIÓN ATÓMICA Y REBOOT DE MOTOR
           ln -sfn "$RELEASE_PATH" "$BASE_PATH/current.new"
           mv -Tf "$BASE_PATH/current.new" "$BASE_PATH/current"
+          
+          # REINICIO AGRESIVO: Necesario para limpiar el OPcache y descriptores de archivos
           sudo systemctl restart php8.4-fpm
           
-          sleep 5
+          # 6. VERIFICACIÓN DE SALUD (Punto 3.7)
+          echo "Validando salud interna..."
+          sleep 10
+          # El Gate ahora es estricto y fallará si storage es false
           HEALTH_JSON=$(php8.4 artisan tinker --execute="echo json_encode(app(App\Http\Controllers\HealthController::class)->__invoke()->getData());")
-          [[ "$HEALTH_JSON" == *"\"storage\":{\"ok\":true}"* ]] || exit 1
+          echo "Resultado: $HEALTH_JSON"
+
+          if [[ "$HEALTH_JSON" == *"\"storage\":{\"ok\":true}"* ]]; then
+            echo "✅ SISTEMA 100% SALUDABLE"
+            # Mantenimiento: Purga de versiones antiguas
+            cd "$BASE_PATH/releases" && ls -t | tail -n +6 | xargs -r rm -rf
+          else
+            echo "❌ FALLO PERSISTENTE EN STORAGE"
+            exit 1
+          fi
 
   deploy-production:
     name: Deploy to Production
