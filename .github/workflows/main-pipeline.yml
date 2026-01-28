@@ -1,0 +1,175 @@
+name: CI/CD - Sistema de Ventas (Final Absoluto)
+
+on:
+  push:
+    branches: ["main", "ci-dia4"]
+  workflow_dispatch:
+
+jobs:
+  quality-gates:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4" # Alineado con tus dependencias
+          extensions: dom, curl, mbstring, pdo_sqlite, bcmath, intl, gd
+      - name: Validate
+        run: |
+          composer install --no-ansi --no-interaction --prefer-dist
+          rm -f tests/Feature/ExampleTest.php
+          cp .env.example .env && php artisan key:generate
+          mkdir -p database && touch database/database.sqlite
+          ./vendor/bin/pint --test
+          php artisan test --env=testing
+        env:
+          DB_CONNECTION: sqlite
+          DB_DATABASE: database/database.sqlite
+
+  build:
+    name: Build Release
+    needs: quality-gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4" # Crucial para que composer install no falle
+      - name: Build
+        run: |
+          composer install --no-dev --optimize-autoloader
+          npm ci && npm run build
+          date +%Y%m%d_%H%M%S > RELEASE_ID
+          tar -czf /tmp/release.tar.gz --exclude='./release.tar.gz' --exclude='./node_modules' .
+          mv /tmp/release.tar.gz release.tar.gz
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-package
+          path: release.tar.gz
+
+  deploy-staging:
+    name: Deploy to Staging
+    needs: build
+    runs-on: self-hosted
+    environment: staging
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-package
+
+      - name: Atomic Deploy & Application Health Gate
+        run: |
+          set -e
+          BASE_PATH="/var/www/comprasventas"
+          RELEASE_PATH="$BASE_PATH/releases/stg-$(date +%Y%m%d%H%M%S)"
+          
+          # 1. Extracción y Limpieza de Manifiestos Viejos
+          mkdir -p "$RELEASE_PATH"
+          tar -xzf release.tar.gz -C "$RELEASE_PATH"
+          # ELIMINAR CACHÉ HEREDADA: Vital para evitar el status 'degraded'
+          rm -f "$RELEASE_PATH/bootstrap/cache"/*.php
+          
+          # 2. Re-vinculación de Infraestructura (Punto 3.6)
+          # Eliminamos cualquier carpeta storage física que venga en el artefacto
+          rm -rf "$RELEASE_PATH/storage"
+          mkdir -p "$BASE_PATH/shared/storage/framework"/{views,sessions,cache/data}
+          
+          # Enlaces simbólicos críticos
+          ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
+          ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
+          
+          # 3. GOBERNANZA DE PERMISOS (Punto 5 y 8)
+          # Aplicamos propiedad y bit de herencia para que www-data siempre pueda escribir
+          sudo chown -R fellsing:www-data "$BASE_PATH/shared/storage"
+          sudo chown -R fellsing:www-data "$RELEASE_PATH"
+          sudo chmod -R 2775 "$BASE_PATH/shared/storage"
+          sudo chmod -R 775 "$RELEASE_PATH/bootstrap/cache"
+          
+          # 4. OPTIMIZACIÓN DESDE CERO
+          cd "$RELEASE_PATH"
+          php8.4 artisan config:clear
+          php8.4 artisan optimize:clear
+          php8.4 artisan view:clear # Limpia restos de compilaciones previas
+          php8.4 artisan migrate --force
+          
+          # 5. ACTIVACIÓN ATÓMICA Y REBOOT DE MOTOR
+          ln -sfn "$RELEASE_PATH" "$BASE_PATH/current.new"
+          mv -Tf "$BASE_PATH/current.new" "$BASE_PATH/current"
+          
+          # REINICIO AGRESIVO: Necesario para limpiar el OPcache y descriptores de archivos
+          sudo systemctl restart php8.4-fpm
+          
+          # 6. VERIFICACIÓN DE SALUD (Punto 3.7)
+          echo "Validando salud interna..."
+          sleep 10
+          # El Gate ahora es estricto y fallará si storage es false
+          HEALTH_JSON=$(php8.4 artisan tinker --execute="echo json_encode(app(App\Http\Controllers\HealthController::class)->__invoke()->getData());")
+          echo "Resultado: $HEALTH_JSON"
+
+          if [[ "$HEALTH_JSON" == *"\"storage\":{\"ok\":true}"* ]]; then
+            echo "✅ SISTEMA 100% SALUDABLE"
+            # Mantenimiento: Purga de versiones antiguas
+            cd "$BASE_PATH/releases" && ls -t | tail -n +6 | xargs -r rm -rf
+          else
+            echo "❌ FALLO PERSISTENTE EN STORAGE"
+            exit 1
+          fi
+
+  deploy-production:
+    name: Deploy to Production
+    needs: deploy-staging
+    if: github.ref == 'refs/heads/main'
+    runs-on: self-hosted
+    environment: Production
+    steps:
+      - name: Download
+        uses: actions/download-artifact@v4
+        with:
+          name: app-package
+      - name: Final Deploy
+        run: |
+          set -e
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          BASE_PATH="/var/www/comprasventas"
+          RELEASE_PATH="$BASE_PATH/releases/prod-$TIMESTAMP"
+          
+          mkdir -p "$RELEASE_PATH"
+          tar -xzf release.tar.gz -C "$RELEASE_PATH"
+          ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
+          ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
+          sudo chown -R fellsing:www-data "$BASE_PATH/shared"
+          sudo chmod -R 775 "$BASE_PATH/shared"
+          
+          cd "$RELEASE_PATH"
+          php artisan optimize:clear
+          php artisan migrate --force
+          ln -sfn "$RELEASE_PATH" "$BASE_PATH/current"
+          sudo systemctl reload php8.4-fpm
+          
+          sleep 10
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://192.168.100.63/api/health)
+          [ $STATUS -eq 200 ] || exit 1
+
+  # ==========================================
+  # Tarea 5: Rollback Automático (Mitigación)
+  # ==========================================
+  rollback:
+    name: Automatic Rollback
+    needs: [deploy-staging, deploy-production]
+    if: failure()
+    runs-on: self-hosted
+    steps:
+      - name: Recover Last Stable Release
+        run: |
+          BASE_PATH="/var/www/comprasventas"
+          PREVIOUS=$(ls -td $BASE_PATH/releases/stg-* | sed -n '2p')
+          if [ -n "$PREVIOUS" ]; then
+            ln -sfn "$PREVIOUS" "$BASE_PATH/current"
+            sudo systemctl reload php8.4-fpm
+            echo "🔙 Rollback ejecutado correctamente"
+          fi

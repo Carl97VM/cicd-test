@@ -10,12 +10,7 @@ class HealthTest extends TestCase
     {
         $res = $this->getJson('/api/health');
 
-        // En CI controlaremos DB para que sea OK.
-        // En local, si no hay DB responderá 503, por lo que permitimos ambos estados para este test genérico.
-        // Sin embargo, queremos asertar estructura.
-
         if ($res->status() === 503) {
-            $res->assertStatus(503);
             $res->assertJsonPath('status', 'degraded');
         } else {
             $res->assertStatus(200);
@@ -24,8 +19,11 @@ class HealthTest extends TestCase
 
         $res->assertJsonStructure([
             'status',
-            'app' => ['env', 'debug'],
+            'timestamp',
+            'app' => ['name', 'env', 'debug', 'version'],
             'db' => ['ok', 'latency_ms', 'driver'],
+            'cache' => ['ok'],
+            'storage' => ['ok'],
         ]);
     }
 }
