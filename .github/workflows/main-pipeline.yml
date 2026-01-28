@@ -116,52 +116,59 @@ jobs:
       #       echo "Respuesta del sistema: $HEALTH_JSON"
       #       exit 1
       #     fi
+      # 
       - name: Atomic Deploy & Application Health Gate
         run: |
           set -e
           BASE_PATH="/var/www/comprasventas"
-          RELEASE_PATH="$BASE_PATH/releases/stg-$(date +%Y%m%d%H%M%S)"
+          TIMESTAMP=$(date +%Y%m%d%H%M%S)
+          RELEASE_PATH="$BASE_PATH/releases/stg-$TIMESTAMP"
           
-          # 1. Asegurar Infraestructura Shared
-          mkdir -p "$BASE_PATH/shared/storage/framework"/{views,sessions,cache}
-          mkdir -p "$BASE_PATH/shared/storage/logs"
+          # 1. PREPARACIÓN FÍSICA Y ESTRUCTURA
+          # Aseguramos que existan todas las subcarpetas en shared para evitar errores de symlink
+          mkdir -p "$BASE_PATH/shared/storage"/{app,framework/views,framework/sessions,framework/cache,logs}
           mkdir -p "$RELEASE_PATH"
           tar -xzf release.tar.gz -C "$RELEASE_PATH"
           
-          # 2. Vínculos y Permisos Críticos (REFORZADO)
+          # 2. VINCULACIÓN ATÓMICA
           ln -nfs "$BASE_PATH/shared/.env" "$RELEASE_PATH/.env"
           ln -nfs "$BASE_PATH/shared/storage" "$RELEASE_PATH/storage"
           
-          # Reparación profunda de permisos: shared y release actual
+          # 3. GOBERNANZA DE PERMISOS (Solución definitiva al Storage: False)
+          # Aplicamos propiedad al grupo www-data de forma recursiva en shared y el release
           sudo chown -R fellsing:www-data "$BASE_PATH/shared/storage"
-          sudo chmod -R 775 "$BASE_PATH/shared/storage"
           sudo chown -R fellsing:www-data "$RELEASE_PATH"
+          # Permisos 775 para permitir escritura al servidor web
+          sudo chmod -R 775 "$BASE_PATH/shared/storage"
           sudo chmod -R 775 "$RELEASE_PATH/bootstrap/cache"
           
-          # 3. Optimización y Limpieza de Vistas (Vital para el Storage True)
+          # 4. OPTIMIZACIÓN DEL MOTOR (PHP 8.4)
           cd "$RELEASE_PATH"
           php8.4 artisan optimize:clear
-          php8.4 artisan view:clear # Limpia vistas viejas que pueden dar falsos negativos
+          php8.4 artisan view:clear # Crucial para resetear el estado de las vistas
           php8.4 artisan migrate --force
           
-          # 4. Activación Atómica
+          # 5. ACTIVACIÓN Y RECARGA DE SERVICIOS
           ln -sfn "$RELEASE_PATH" "$BASE_PATH/current.new"
           mv -Tf "$BASE_PATH/current.new" "$BASE_PATH/current"
-          sudo systemctl reload php8.4-fpm
+          # Reinicio forzado para limpiar el caché de permisos de PHP
+          sudo systemctl restart php8.4-fpm
           
-          # 5. VALIDACIÓN ESTRICTA (Gate de Maestría)
+          # 6. VALIDACIÓN DE CAJA BLANCA (Requisito 3.7)
           echo "Verificando salud interna del sistema..."
           sleep 5
           HEALTH_JSON=$(php8.4 artisan tinker --execute="echo json_encode(app(App\Http\Controllers\HealthController::class)->__invoke()->getData());")
           
           echo "Resultado interno: $HEALTH_JSON"
 
-          # El Gate ahora FALLARÁ si storage es false, cumpliendo el requisito de calidad
+          # El Gate fallará si status no es 'ok' o storage no es 'true'
           if [[ "$HEALTH_JSON" == *"\"status\":\"ok\""* && "$HEALTH_JSON" == *"\"storage\":{\"ok\":true}"* ]]; then
             echo "✅ SISTEMA ÓPTIMO: Salud verificada al 100%."
+            # Mantenimiento: Purga de versiones antiguas (Mantiene últimas 5)
             cd "$BASE_PATH/releases" && ls -t | tail -n +6 | xargs -r rm -rf
           else
             echo "❌ FALLO CRÍTICO: El sistema reporta estado DEGRADADO."
+            echo "Detalle del fallo: $HEALTH_JSON"
             exit 1
           fi
 
