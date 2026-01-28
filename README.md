@@ -133,6 +133,10 @@ docker exec -it laravel_vite npm run lint
 docker exec -it laravel_vite npm run build
 ```
 
+## CI/CD demostrable para la maestria
+Revisar el repositorio 
+- https://github.com/Carl97VM/cicd-test.git
+
 ## 📄 Licencia
 
 Este proyecto está bajo la licencia [MIT](LICENSE).
