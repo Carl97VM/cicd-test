@@ -2,7 +2,7 @@ name: CI/CD - Sistema de Ventas (Final Absoluto)
 
 on:
   push:
-    branches: ["main", "ci-dia4"]
+    branches: ["main", "ci-dia4", "feature/ci-cd-final"]
   workflow_dispatch:
 
 jobs:
