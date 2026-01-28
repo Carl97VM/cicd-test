@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class HealthController extends Controller
 {
@@ -26,7 +27,7 @@ class HealthController extends Controller
             Cache::put('health_check', true, 5);
             $cacheOk = Cache::has('health_check');
         } catch (\Throwable $e) {
-            // Mantener estados en false si hay fallo de infraestructura
+            // Mantener estados en false
         }
 
         $isHealthy = $dbOk && $storageOk && $cacheOk;
@@ -34,6 +35,19 @@ class HealthController extends Controller
         $versionFile = base_path('RELEASE_ID');
         $versionContent = @file_get_contents($versionFile);
         $version = ($versionContent !== false) ? trim($versionContent) : '1.0.0-dev';
+
+        $context = [
+            'release' => $version,
+            'env' => config('app.env'),
+            'status' => $isHealthy ? 'ok' : 'degraded',
+            'user_id' => auth()->id() ?? 'guest',
+        ];
+
+        if ($isHealthy) {
+            Log::info('Health Check auditado', $context);
+        } else {
+            Log::warning('Health Check degradado detectado', $context);
+        }
 
         return response()->json([
             'status' => $isHealthy ? 'ok' : 'degraded',
